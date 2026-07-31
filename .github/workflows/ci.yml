@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PNPM_VERSION: 10.26.0
+  NODE_VERSION: 22
+
+jobs:
+  lint:
+    name: Lint & typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm format:check
+
+  contracts:
+    name: Foundry tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: forge build
+        working-directory: packages/contracts
+        run: forge build --sizes
+      - name: forge test
+        working-directory: packages/contracts
+        run: forge test -vvv
+      # TODO(Phase 7): add `forge test --match-test invariant` and optional slither job.
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      # TODO(Phase 7): idempotency + replay-golden tests.
+
+  integration:
+    name: Integration (Anvil + Postgres)
+    runs-on: ubuntu-latest
+    # TODO(Phase 7): spin up testcontainers/compose (Anvil + Postgres),
+    # fire real txs, assert projections, kill/restart mid-stream, simulate reorg.
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Integration tests are wired up in Phase 7."
+
+  docker-build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build indexer image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/indexer/Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

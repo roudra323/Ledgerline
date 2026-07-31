@@ -1,0 +1,2 @@
+# TypeORM migrations land here (Phase 1: initial schema for raw_events, sync_state,
+# indexer_failures, staking_records, user_balances, contract_status).

@@ -1,0 +1,12 @@
+/**
+ * ReorgGuardService — protects projections from chain reorganizations.
+ *
+ * TODO(Phase 2):
+ *   - confirmation depth: never process past (head - CONFIRMATIONS).
+ *   - hash continuity: verify parentHash of the next block matches the last persisted block hash.
+ *   - on divergence: orphan affected raw_events, rewind the cursor, replay the affected range.
+ *   - emit chainstake_reorg_rollbacks_total and chainstake_reorg_depth_blocks.
+ * Test with Anvil anvil_snapshot / anvil_revert + re-mine to force divergent hashes.
+ */
+
+export {};

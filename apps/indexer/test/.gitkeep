@@ -1,0 +1,2 @@
+# Unit + integration tests (Phase 7): handlers, chunker, registry validations,
+# idempotency, replay-golden, Anvil+Postgres integration.

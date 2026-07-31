@@ -1,0 +1,60 @@
+# ChainStake alert rules (Phase 3). Routed to a demo channel via Alertmanager.
+# See docs/runbook.md for what to do when each fires.
+groups:
+  - name: chainstake-indexer
+    rules:
+      - alert: IndexerLagHigh
+        expr: chainstake_indexer_lag_seconds > 120
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Indexer lag high on {{ $labels.sync_key }}"
+          description: "Lag has exceeded 120s for 5m. See runbook."
+
+      - alert: IndexerStalled
+        expr: increase(chainstake_chunks_processed_total[10m]) == 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Indexer stalled ({{ $labels.sync_key }})"
+          description: "No chunks processed in 10m. The loop is not advancing."
+
+      - alert: EventProcessingFailed
+        expr: increase(chainstake_events_failed_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Event processing failures ({{ $labels.event_name }})"
+          description: "A funds-affecting event failed to process. Investigate the dead-letter table."
+
+      - alert: ReconciliationDrift
+        expr: chainstake_reconciliation_drift_wei != 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Reconciliation drift detected"
+          description: "On-chain totalStaked() disagrees with indexed aggregates. This pages on-call."
+
+      - alert: RpcProviderDown
+        expr: chainstake_rpc_provider_healthy == 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RPC provider down ({{ $labels.provider }})"
+          description: "Provider unhealthy for 3m; failover should have kicked in."
+
+  - name: chainstake-api
+    rules:
+      - alert: ApiP95High
+        expr: histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[5m]))) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API p95 latency high on {{ $labels.route }}"
+          description: "p95 > 500ms for 10m."
