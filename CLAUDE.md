@@ -99,12 +99,31 @@ infra               docker-compose + Prometheus/Grafana/OTel/Jaeger/Alertmanager
 docs                architecture · failure-modes · decisions/ · conventions · observability · runbook · build-plan
 ```
 
+## The four planning documents
+
+They answer different questions. Use the right one.
+
+| Document                                                       | Answers                                                             |
+| -------------------------------------------------------------- | ------------------------------------------------------------------- |
+| [`docs/build-plan.md`](docs/build-plan.md)                     | _What_ phases exist, exit criteria, what to cut first               |
+| [`docs/learning-path.md`](docs/learning-path.md)               | _Why_ each piece exists — the concepts, in 45 blocks                |
+| [`docs/implementation-guide.md`](docs/implementation-guide.md) | _What to type, in which file, in what order_ — the dependency chain |
+| [`docs/progress.md`](docs/progress.md)                         | _What is done_ — the tracker                                        |
+
+Work block by block through `implementation-guide.md`. Read the matching block in
+`learning-path.md` first.
+
 ## Definition of done for a change
 
 - [ ] Behavior implemented and covered by a test (unit / integration as appropriate).
+- [ ] The block's `Verify` step in `implementation-guide.md` was actually run, not assumed.
 - [ ] New failure modes documented in `docs/failure-modes.md` **with their test**.
 - [ ] Metrics/spans added for any new path; labels within the permitted set.
 - [ ] Money handled as integer minor units, single asset per expression.
 - [ ] A significant design choice has an ADR with alternatives and why they lost.
 - [ ] `pnpm lint` and `pnpm typecheck` clean.
+- [ ] **[`docs/progress.md`](docs/progress.md) updated — in this same commit.** Flip the block to
+      ✅, fill in date and commit, update the progress bar and "Next action", add a Log entry if a
+      design decision changed. A tracker updated in a later commit drifts, and a drifted tracker is
+      worse than none because it states things that aren't true.
 - [ ] Conventional commit message.

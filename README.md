@@ -109,6 +109,15 @@ Every significant choice has an ADR in [`docs/decisions/`](docs/decisions/) reco
 alternatives considered and **why each one lost** — money representation, the outbox, nonce
 allocation, on-chain versus off-chain, key management, and the rest.
 
+## Following along
+
+| Document                                                       | Answers                                                   |
+| -------------------------------------------------------------- | --------------------------------------------------------- |
+| [`docs/progress.md`](docs/progress.md)                         | **What's done so far** — the tracker                      |
+| [`docs/implementation-guide.md`](docs/implementation-guide.md) | What to build next, in which file, and what depends on it |
+| [`docs/learning-path.md`](docs/learning-path.md)               | Why each piece exists — the concepts, block by block      |
+| [`docs/build-plan.md`](docs/build-plan.md)                     | The phases, exit criteria, and what gets cut first        |
+
 ## Repo layout
 
 | Path                 | What                                                                                           |
