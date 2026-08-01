@@ -1,60 +1,265 @@
-# ChainStake alert rules (Phase 3). Routed to a demo channel via Alertmanager.
-# See docs/runbook.md for what to do when each fires.
+# Ledgerline alert rules. Every alert here has a runbook entry in docs/runbook.md.
+#
+# Severity contract:
+#   page     — wake someone up. Money is wrong, or someone else is moving it.
+#   critical — a rail is broken or a saga is stuck. Same shift, not same minute.
+#   warning  — a resource is draining or a queue is backing up. Fix before it becomes critical.
+#
+# TODO(Phase 7): these fire against metrics implemented in Phase 7. Until then they evaluate
+# against absent series and stay inactive, which is correct — an alert on a metric that does not
+# exist yet must not fire.
+
 groups:
-  - name: chainstake-indexer
+  # ---------------------------------------------------------------- money truth
+  - name: ledgerline-money-truth
     rules:
-      - alert: IndexerLagHigh
-        expr: chainstake_indexer_lag_seconds > 120
+      - alert: TrialBalanceBroken
+        expr: ledgerline_trial_balance_residual_minor != 0
+        for: 1m
+        labels: { severity: page }
+        annotations:
+          summary: "Trial balance is non-zero for {{ $labels.asset }}"
+          description: >-
+            A ledger transaction's debits and credits do not sum to zero within an asset. The
+            deferred constraint trigger should make this impossible, so it is ALWAYS a code bug —
+            a dropped trigger, a posting path that bypassed LedgerService, or a direct write.
+            Never auto-heal: post a reversing transaction with an operator id.
+          runbook: "docs/runbook.md#trialbalancebroken-page"
+
+      - alert: ReserveCoverageLow
+        expr: ledgerline_reserve_coverage_ratio < 1
         for: 5m
-        labels:
-          severity: warning
+        labels: { severity: page }
         annotations:
-          summary: "Indexer lag high on {{ $labels.sync_key }}"
-          description: "Lag has exceeded 120s for 5m. See runbook."
+          summary: "Reserve coverage {{ $value }} — issued more than we back"
+          description: >-
+            bank_settlement + psp_receivable no longer covers totalSupply(). Halt minting by
+            freezing the treasury_minter account, then determine which side moved.
+          runbook: "docs/runbook.md#reservecoveragelow-page"
 
-      - alert: IndexerStalled
-        expr: increase(chainstake_chunks_processed_total[10m]) == 0
-        for: 0m
-        labels:
-          severity: critical
+      - alert: UnknownTreasuryOutflow
+        expr: increase(ledgerline_unknown_outflows_total[5m]) > 0
+        labels: { severity: page }
         annotations:
-          summary: "Indexer stalled ({{ $labels.sync_key }})"
-          description: "No chunks processed in 10m. The loop is not advancing."
+          summary: "Treasury outflow with no matching chain_transactions row"
+          description: >-
+            Invariant I8 tripped. Value left the treasury via a transaction we did not create.
+            ASSUME KEY COMPROMISE UNTIL PROVEN OTHERWISE. Freeze the account first, investigate
+            second. This is the highest-severity alert in the system.
+          runbook: "docs/runbook.md#unknowntreasuryoutflow-page--the-highest-severity-alert-in-the-system"
 
-      - alert: EventProcessingFailed
-        expr: increase(chainstake_events_failed_total[5m]) > 0
-        for: 0m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Event processing failures ({{ $labels.event_name }})"
-          description: "A funds-affecting event failed to process. Investigate the dead-letter table."
-
-      - alert: ReconciliationDrift
-        expr: chainstake_reconciliation_drift_wei != 0
+      - alert: SupplyDrift
+        expr: ledgerline_supply_drift_minor != 0
         for: 10m
-        labels:
-          severity: critical
+        labels: { severity: critical }
         annotations:
-          summary: "Reconciliation drift detected"
-          description: "On-chain totalStaked() disagrees with indexed aggregates. This pages on-call."
+          summary: "totalSupply() disagrees with the ledger for {{ $labels.asset }}"
+          description: "Direction tells you what it is — see the runbook decision tree."
+          runbook: "docs/runbook.md#supplydrift--treasurydrift"
+
+      - alert: TreasuryDrift
+        expr: ledgerline_treasury_drift_minor != 0
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "balanceOf(treasury) disagrees with the ledger for {{ $labels.asset }}"
+          runbook: "docs/runbook.md#supplydrift--treasurydrift"
+
+      - alert: PspDrift
+        expr: abs(ledgerline_psp_drift_minor) > 0
+        for: 30m
+        labels: { severity: critical }
+        annotations:
+          summary: "PSP position disagrees with fiat_events ({{ $labels.direction }})"
+          description: >-
+            "PSP ahead of us" is usually a dropped webhook and the poller recovers it.
+            "We ahead of PSP" has no benign explanation — treat as a forged webhook.
+          runbook: "docs/runbook.md#pspdrift"
+
+  # ---------------------------------------------------------------- rails
+  - name: ledgerline-rails
+    rules:
+      - alert: ForgedFiatEvent
+        expr: increase(ledgerline_webhook_signature_failures_total[10m]) > 3
+        labels: { severity: critical }
+        annotations:
+          summary: "Repeated webhook signature failures from {{ $labels.provider }}"
+          description: >-
+            Check the deployed secret matches the provider's first — that is the one boring cause.
+            If it does, this is a security incident, not a reconciliation one.
+          runbook: "docs/runbook.md#forgedfiatevent"
+
+      - alert: RpcDisagreement
+        expr: increase(ledgerline_receipt_disagreement_total[10m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "RPC providers disagree on a confirming block hash"
+          description: "Irreversible fiat actions are held automatically. Confirm which provider is stale."
+          runbook: "docs/runbook.md#rpcdisagreement"
+
+      - alert: ReorgBeyondConfirmations
+        expr: increase(ledgerline_reorg_beyond_confirmations_total[5m]) > 0
+        labels: { severity: page }
+        annotations:
+          summary: "Reorg deeper than the confirmation policy"
+          description: >-
+            We treated something as final that was not. Downstream irreversible actions may
+            already have fired. Enumerate them in order: fiat payouts, token deliveries, refunds.
+          runbook: "docs/runbook.md#reorgbeyondconfirmations-page"
+
+      - alert: UnmatchedFiatEventAging
+        expr: ledgerline_unmatched_fiat_events > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "fiat_events row unmatched for 15m ({{ $labels.provider }})"
+          runbook: "docs/runbook.md#warnings"
+
+      - alert: ScreeningUnavailable
+        expr: increase(ledgerline_screening_unavailable_total[10m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Screening provider {{ $labels.provider }} unavailable"
+          description: "Sagas park rather than credit — the system fails closed by design."
+          runbook: "docs/runbook.md#warnings"
+
+  # ---------------------------------------------------------------- sagas & queues
+  - name: ledgerline-sagas
+    rules:
+      - alert: SagaStuck
+        expr: |
+          min_over_time(
+            ledgerline_sagas_in_state{status=~"chain_submitted|fiat_submitted"}[15m]
+          ) > 0
+          and
+          deriv(ledgerline_sagas_in_state{status=~"chain_submitted|fiat_submitted"}[15m]) >= 0
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.saga_type }} sagas accumulating in {{ $labels.status }}"
+          runbook: "docs/runbook.md#sagastuck--illegalsagatransition"
+
+      - alert: IllegalSagaTransition
+        expr: increase(ledgerline_saga_illegal_transitions_total[5m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "Illegal transition on a {{ $labels.saga_type }} saga"
+          description: >-
+            A cause arrived that can never be legal from the current state. The important case is
+            capture_failed -> captured: we told a customer "declined" and then took their money.
+          runbook: "docs/runbook.md#sagastuck--illegalsagatransition"
+
+      - alert: SagasInManualReview
+        expr: ledgerline_sagas_manual_review > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value }} {{ $labels.saga_type }} saga(s) awaiting a human"
+          runbook: "docs/runbook.md#warnings"
+
+      - alert: OutboxDeadLetter
+        expr: increase(ledgerline_outbox_processed_total{result="dead"}[15m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "Outbox message dead-lettered ({{ $labels.kind }})"
+          description: "Requeuing is always safe — dedupe_key is the downstream idempotency key."
+          runbook: "docs/runbook.md#outboxdeadletter"
+
+      - alert: OutboxBacklog
+        expr: ledgerline_outbox_oldest_pending_seconds > 300
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Oldest pending outbox message is {{ $value }}s old ({{ $labels.kind }})"
+          runbook: "docs/runbook.md#warnings"
+
+  # ---------------------------------------------------------------- chain writer
+  - name: ledgerline-chain-writer
+    rules:
+      - alert: StuckTransaction
+        expr: ledgerline_chain_tx_stuck > 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Transaction at the fee ceiling on {{ $labels.role }}"
+          description: "Use the operator cancel endpoint (same nonce, to=self, aggressive fees)."
+          runbook: "docs/runbook.md#stucktransaction--noncegap"
+
+      - alert: NonceGap
+        expr: ledgerline_chain_nonce_gap_depth > 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Nonce gap depth {{ $value }} on {{ $labels.role }}"
+          description: "Fix the OLDEST nonce. Never bump a later transaction to fill a hole."
+          runbook: "docs/runbook.md#stucktransaction--noncegap"
+
+      - alert: GasBalanceLow
+        expr: ledgerline_chain_account_balance_wei < 5e16
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.role }} gas balance low"
+          description: "Below the hard floor the submitter circuit-breaks and sagas park in awaiting_gas."
+          runbook: "docs/runbook.md#warnings"
+
+      - alert: MinterAllowanceLow
+        expr: ledgerline_minter_allowance_remaining_minor < 2e8
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Minter allowance below 20%"
+          description: "Deliberately NOT auto-topped-up. Raise it consciously, with a reason."
+          runbook: "docs/runbook.md#warnings"
+
+      - alert: FloatBelowMinimum
+        expr: ledgerline_account_balance_minor{account_code="1100"} < 1e8
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Treasury token float below minimum"
+          description: "Sagas park in awaiting_liquidity; they are not lost. Check the rebalance job."
+          runbook: "docs/runbook.md#warnings"
+
+  # ---------------------------------------------------------------- indexer & API (inherited)
+  - name: ledgerline-indexer
+    rules:
+      - alert: IndexerStalled
+        expr: increase(ledgerline_chunks_processed_total[10m]) == 0
+        labels: { severity: critical }
+        annotations:
+          summary: "Indexer has processed no chunks in 10m"
+          description: "Restart is safe — the cursor is persisted and ingestion is idempotent."
+          runbook: "docs/runbook.md#indexerstalled"
+
+      - alert: IndexerLagHigh
+        expr: ledgerline_indexer_lag_seconds > 120
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Indexer lag {{ $value }}s on {{ $labels.sync_key }}"
+          runbook: "docs/runbook.md#warnings"
 
       - alert: RpcProviderDown
-        expr: chainstake_rpc_provider_healthy == 0
+        expr: ledgerline_rpc_provider_healthy == 0
         for: 3m
-        labels:
-          severity: warning
+        labels: { severity: warning }
         annotations:
-          summary: "RPC provider down ({{ $labels.provider }})"
-          description: "Provider unhealthy for 3m; failover should have kicked in."
+          summary: "RPC provider {{ $labels.provider }} unhealthy"
+          description: >-
+            With one provider left the B10 receipt cross-check cannot run, so pre-payout
+            verification degrades. Confirm the other provider is healthy.
+          runbook: "docs/runbook.md#warnings"
 
-  - name: chainstake-api
+  - name: ledgerline-api
     rules:
       - alert: ApiP95High
-        expr: histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[5m]))) > 0.5
+        expr: |
+          histogram_quantile(
+            0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[5m]))
+          ) > 0.5
         for: 10m
-        labels:
-          severity: warning
+        labels: { severity: warning }
         annotations:
-          summary: "API p95 latency high on {{ $labels.route }}"
-          description: "p95 > 500ms for 10m."
+          summary: "p95 latency {{ $value }}s on {{ $labels.route }}"
+          runbook: "docs/runbook.md#warnings"

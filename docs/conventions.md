@@ -1,4 +1,4 @@
-# ChainStake — Coding Conventions
+# Ledgerline — Coding Conventions
 
 > Code is read far more than it is written. Optimize for the next person (often you, in six months).
 > **Clarity beats cleverness. Always.**
@@ -28,16 +28,17 @@ fix the tool config, don't work around it.
 | Thing                                | Convention                                      | Example                                              |
 | ------------------------------------ | ----------------------------------------------- | ---------------------------------------------------- |
 | Files & directories                  | `kebab-case`                                    | `sync-state.service.ts`, `event-registry.service.ts` |
-| TS classes, interfaces, types, enums | `PascalCase`                                    | `IndexerService`, `RawEvent`, `StakingEventName`     |
+| TS classes, interfaces, types, enums | `PascalCase`                                    | `LedgerService`, `RawEvent`, `OnrampStatus`          |
 | Variables & functions                | `camelCase`                                     | `chunkSize`, `advanceCursor()`                       |
 | Constants (true constants)           | `UPPER_SNAKE_CASE`                              | `MAX_CHUNK_SIZE`, `DEFAULT_CONFIRMATIONS`            |
 | Booleans                             | `is/has/should/can` prefix                      | `isPaused`, `hasReorg`, `shouldRetry`                |
 | Nest classes                         | suffix by role                                  | `*.service.ts`, `*.controller.ts`, `*.module.ts`     |
-| TypeORM entities                     | `PascalCase` class, `snake_case` table/column   | `class UserBalance` → `user_balances`                |
-| Solidity contracts / events          | `PascalCase`                                    | `StakingVault`, `event Staked(...)`                  |
-| Solidity functions / vars            | `camelCase`; internal/private `_`-prefixed      | `totalStaked`, `_accrueRewards()`                    |
+| TypeORM entities                     | `PascalCase` class, `snake_case` table/column   | `class LedgerEntry` → `ledger_entries`               |
+| Solidity contracts / events          | `PascalCase`                                    | `PaymentProcessor`, `event PaymentSettled(...)`      |
+| Solidity functions / vars            | `camelCase`; internal/private `_`-prefixed      | `totalSupply`, `_beforeTokenTransfer()`              |
+| Money-bearing names                  | carry the unit as a suffix                      | `amountMinor`, `valueWei`, `feeBps`                  |
 | Database tables & columns            | `snake_case`, tables plural                     | `raw_events`, `log_index`                            |
-| Prometheus metrics                   | `chainstake_` prefix, `snake_case`, unit suffix | `chainstake_indexer_lag_seconds`                     |
+| Prometheus metrics                   | `ledgerline_` prefix, `snake_case`, unit suffix | `ledgerline_indexer_lag_seconds`                     |
 | Env variables                        | `UPPER_SNAKE_CASE`                              | `RPC_URL_PRIMARY`                                    |
 | Async functions                      | verb that implies the wait                      | `fetchLogs()`, not `logs()`                          |
 
@@ -123,10 +124,10 @@ fix the tool config, don't work around it.
 
 ## 7. Imports & file layout
 
-- **Import order:** node builtins → external packages → internal `@chainstake/*` → relative — a blank
+- **Import order:** node builtins → external packages → internal `@ledgerline/*` → relative — a blank
   line between groups. (Prettier/ESLint keep this tidy.)
 - **One primary export per file**, named to match the file (`indexer.service.ts` → `IndexerService`).
-- **No deep relative reaching** (`../../../..`). Cross-package code goes through `@chainstake/shared`.
+- **No deep relative reaching** (`../../../..`). Cross-package code goes through `@ledgerline/shared`.
 - **Barrel files (`index.ts`)** only for a package's public surface — don't create them just to shorten
   imports internally.
 
@@ -147,12 +148,45 @@ fix the tool config, don't work around it.
 ## 9. Database & TypeORM
 
 - **Migrations, never `synchronize: true`.** Schema changes are reviewed, versioned migrations.
-- **Constraints belong in the schema.** The idempotency guarantee (`UNIQUE(chain_id, tx_hash, log_index)`)
-  is a DB constraint, not app-level hope.
-- **Transactions for multi-write invariants.** Cursor advance + raw-event insert commit together.
-- **Money/amounts as `numeric`/`bigint`-safe types**, handled as strings in TS — never JS `number`
-  for token amounts (precision loss).
+- **Constraints belong in the schema, not in application hope.** Every load-bearing guarantee in this
+  system is a database object: the two log dedupe keys, the cause-keyed saga uniqueness, the deferred
+  balance trigger, the immutability trigger. If it is not in the schema, it is not a constraint — it
+  is a convention that will be violated by a migration script at 3am.
+- **Transactions for multi-write invariants.** Cursor advance + raw-event insert commit together; the
+  outbox message commits with the state change that caused it.
+- **Statuses are `text` + `CHECK`, never Postgres enums** — see
+  [ADR-0014](decisions/0014-statuses-as-text.md). Historical `saga_transitions` rows must keep
+  retired status names readable forever.
 - **Parameterized queries only.** Never string-concatenate SQL.
+
+### 9.1 Money — the rule that overrides everything else
+
+See [ADR-0001](decisions/0001-money-representation.md). This is not stylistic; a violation is a
+money-loss bug.
+
+- Every amount is an **integer in the minor unit of a named asset**: `numeric(38,0)` in Postgres,
+  `string` in TypeScript, `bigint` only _inside_ arithmetic helpers.
+- **Never JS `number` for an amount.** Not for display, not "just this once", not for a comparison.
+- **An arithmetic expression may only combine amounts with the same `asset_code`.** Scale belongs to
+  the asset (via the `assets` table), never to the row.
+- **Cross-asset movement is never a subtraction.** It is two balanced ledger transactions joined by
+  the FX clearing pair. "Sums to zero" across different units is not an invariant.
+- **Exactly one function may change scale:** `convert()`, which returns `{ amount, residual }`. The
+  residual is **journaled** to `3900 rounding_residual`, never dropped. Dust that is silently
+  discarded is the thing that makes a trial balance drift.
+- Column and variable names carry the unit: `*_minor`, `*_wei`, `*_bps`.
+
+### 9.2 Metric label cardinality — a hard boundary
+
+The permitted label set is enumerated in [`observability.md`](observability.md) §1 and is
+**exhaustive**. Never a merchant id, customer id, address, tx hash, payment id or idempotency key as
+a Prometheus label.
+
+That is not a stylistic preference — unbounded label cardinality is how you take down a Prometheus.
+When an invariant is genuinely per-entity (I5, per-merchant drift), export the **aggregate** (a count
+and a maximum) and resolve the entity id **at alert time** into the annotation. High-cardinality
+identifiers belong in **span attributes and structured logs**, where cardinality is free and where
+you actually need them during an incident.
 
 ---
 
@@ -174,9 +208,19 @@ fix the tool config, don't work around it.
 - **Arrange–Act–Assert**, one logical assertion per test, descriptive names:
   `it("re-applies a duplicate event as a no-op")`.
 - **Deterministic tests.** No reliance on wall-clock, ordering, or network flakiness.
-- **The load-bearing tests for this project:** idempotency (apply twice → identical state), replay
-  determinism (ingest → snapshot → replay → deep-equal), reorg orphaning. These are non-negotiable.
-- **Solidity:** unit test per function + an **invariant test** (`sum(stakes) == token.balanceOf(vault)`).
+- **The load-bearing tests for this project** — non-negotiable, in order of value:
+  1. **Crash injection on the chain write path** (kill at each `CrashPoint` → exactly one mined tx).
+  2. **Trial balance** (property test: `Σ debits = Σ credits` per asset after every commit).
+  3. **Idempotency** at all three levels: the same webhook, the same API call, the same `intent_key`.
+  4. **Replay determinism** (ingest → snapshot → truncate → rebuild → deep-equal).
+  5. **The saga compensation matrix** — one row per `(saga_type, failure_injection_point)`. This
+     table _is_ the state-machine spec, made executable.
+  6. **Reorg orphaning**, within and beyond confirmation depth.
+- **Every entry in [`failure-modes.md`](failure-modes.md) names the test that proves it.** An entry
+  with no test is a claim, not a design. If you add a failure mode, add its test in the same commit.
+- **Solidity:** a unit test per function **plus** an invariant suite with a bounded handler and ghost
+  accounting — `Σ balances == totalSupply`, `balanceOf(processor) == 0` after every action, minter
+  allowance never exceeded, `decimals() == 6`.
 
 ---
 
@@ -185,7 +229,8 @@ fix the tool config, don't work around it.
 - **Conventional Commits**, enforced by commitlint:
   `type(scope): summary` → e.g. `feat(indexer): add adaptive chunk sizing`.
   Types: `feat, fix, refactor, test, docs, chore, ci, perf, build`. Scopes:
-  `indexer, web, contracts, shared, infra, docs, ci, deps, repo`.
+  `indexer, ledger, sagas, fiat, chain, compliance, mock-psp, web, contracts, shared, infra, docs,
+ci, deps, repo`.
 - **Small, atomic commits** that each leave the repo in a working state. One logical change per commit.
 - **Imperative mood** in the summary ("add", not "added"/"adds"), ≤ ~72 chars, no trailing period.
 - **Never commit** secrets, `.env`, `node_modules`, build output, or generated `lib/`/`out/`.

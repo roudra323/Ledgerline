@@ -1,17 +1,16 @@
-import { Module } from "@nestjs/common";
-
 /**
- * ApiModule — public read endpoints (Phase 1+):
- *   GET /users/:address/balance
- *   GET /users/:address/history
- *   GET /stats                 (TVL, stakers count)
- *   GET /health/indexer        (lag, cursor positions)
+ * ApiModule — the read API. Queries PROJECTIONS ONLY, never the chain and never an external rail.
  *
- * TODO(Phase 1): register controllers + query services (read from projections only).
+ * TODO(Phase 6):
+ *   - POST /payment-intents            (Idempotency-Key required)
+ *   - GET  /payment-intents/:id
+ *   - GET  /merchants/:id/balance      from ledger_account_balances
+ *   - GET  /merchants/:id/payments
+ *   - GET  /health                     lag, cursors, outbox depth — reports staleness honestly
+ * TODO(Phase 8): POST /payment-intents/:id/refunds
+ * TODO(Phase 9): POST /payouts
+ *
+ * Thin controllers, fat services. Every inbound DTO is validated.
  */
-@Module({
-  imports: [],
-  controllers: [],
-  providers: [],
-})
-export class ApiModule {}
+
+export {};

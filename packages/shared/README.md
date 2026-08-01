@@ -1,15 +1,10 @@
-# @chainstake/shared
+# @ledgerline/shared
 
-Cross-cutting artifacts shared by the indexer, web app, and loadgen:
+The cross-workspace contract: ABIs, domain types, deployed addresses. Deliberately small.
 
-- **`src/abis/`** — typed contract ABIs (`as const` for viem inference), generated from
-  `packages/contracts/out` (Phase 0).
-- **`src/types/`** — shared domain types (`Address`, `ContractName`, `StakingEventName`, …).
-- **`src/addresses.ts`** — deployed contract addresses; the deployer writes `addresses.local.json`
-  (git-ignored) at chain boot.
+- `types/` — `AmountMinor` (always a string, never a JS `number`), `AssetCode`, event name unions,
+  `DeployedAddresses`.
+- `abis/` — generated from `forge build` by `pnpm abi:gen`. **Generated, never hand-edited.**
+- `addresses.ts` — loaded from the deployer's `addresses.local.json`.
 
-Consume via the workspace name:
-
-```ts
-import { addresses, type StakingEventName } from "@chainstake/shared";
-```
+Cross-package imports go through this package rather than deep relative paths.

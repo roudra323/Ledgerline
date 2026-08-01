@@ -11,8 +11,8 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY infra/loadgen/package.json infra/loadgen/package.json
 COPY packages/shared/package.json packages/shared/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile --filter @chainstake/loadgen...
+    pnpm install --frozen-lockfile --filter @ledgerline/loadgen...
 
 COPY . .
 USER node
-CMD ["pnpm", "--filter", "@chainstake/loadgen", "start"]
+CMD ["pnpm", "--filter", "@ledgerline/loadgen", "start"]

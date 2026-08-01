@@ -1,8 +1,8 @@
 {
-  "name": "@chainstake/indexer",
+  "name": "@ledgerline/indexer",
   "version": "0.1.0",
   "private": true,
-  "description": "ChainStake indexing engine + read API + admin (NestJS).",
+  "description": "Ledgerline indexing engine + read API + admin (NestJS).",
   "license": "MIT",
   "type": "commonjs",
   "scripts": {
@@ -16,15 +16,24 @@
     "test": "jest --passWithNoTests",
     "test:watch": "jest --watch",
     "test:e2e": "jest --config ./test/jest-e2e.json --passWithNoTests",
-    "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/blockchain/data-source.ts",
-    "migration:run": "typeorm-ts-node-commonjs migration:run -d src/blockchain/data-source.ts"
+    "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/data-source.ts",
+    "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts",
+    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/data-source.ts",
+    "test:integration": "jest --config ./test/jest-integration.json --passWithNoTests"
   },
   "dependencies": {
+    "@ledgerline/shared": "workspace:*",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/schedule": "^5.0.0",
     "@nestjs/typeorm": "^11.0.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.55.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.57.0",
+    "@opentelemetry/resources": "^1.30.0",
+    "@opentelemetry/sdk-node": "^0.57.0",
+    "@opentelemetry/semantic-conventions": "^1.28.0",
     "@willsoto/nestjs-prometheus": "^6.0.2",
     "nestjs-pino": "^4.3.0",
     "pg": "^8.13.1",
@@ -33,13 +42,7 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "typeorm": "^0.3.20",
-    "viem": "^2.21.0",
-    "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/sdk-node": "^0.57.0",
-    "@opentelemetry/auto-instrumentations-node": "^0.55.0",
-    "@opentelemetry/exporter-trace-otlp-grpc": "^0.57.0",
-    "@opentelemetry/resources": "^1.30.0",
-    "@opentelemetry/semantic-conventions": "^1.28.0"
+    "viem": "^2.21.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",

@@ -1,9 +1,9 @@
-# ChainStake full stack. `make demo` (from repo root) is the canonical one-command experience.
+# Ledgerline full stack. `make demo` (from repo root) is the canonical one-command experience.
 # Build context for app images is the REPO ROOT so pnpm workspaces resolve.
 #
 # NOTE: services are wired with sensible defaults but several depend on artifacts that land in later
 # build phases (contract deploy, indexer image, dashboards). Treat this as the target topology.
-name: chainstake
+name: ledgerline
 
 x-env: &default-env
   env_file:
@@ -12,7 +12,7 @@ x-env: &default-env
 services:
   # ── Chain ──────────────────────────────────────────────────
   anvil:
-    image: ghcr.io/foundry-rs/foundry:latest
+    image: ghcr.io/foundry-rs/foundry:v1.0.0
     entrypoint: ["anvil"]
     command: >-
       --host 0.0.0.0 --block-time 2
@@ -27,7 +27,7 @@ services:
 
   # Second Anvil so RPC failover (viem fallback) is demonstrable.
   anvil2:
-    image: ghcr.io/foundry-rs/foundry:latest
+    image: ghcr.io/foundry-rs/foundry:v1.0.0
     entrypoint: ["anvil"]
     command: >-
       --host 0.0.0.0 --block-time 2
@@ -36,7 +36,7 @@ services:
 
   # Runs the deploy script once, writes addresses to the shared volume, then exits.
   deployer:
-    image: ghcr.io/foundry-rs/foundry:latest
+    image: ghcr.io/foundry-rs/foundry:v1.0.0
     working_dir: /contracts
     volumes:
       - ../packages/contracts:/contracts
@@ -44,28 +44,62 @@ services:
     depends_on:
       anvil:
         condition: service_healthy
-    # TODO(Phase 0/6): forge install + forge script Deploy.s.sol --broadcast, write addresses to /out
-    entrypoint: ["sh", "-c", "echo 'TODO(Phase 0): forge script Deploy.s.sol' && sleep 1"]
+    # TODO(Phase 2): forge install + forge script Deploy.s.sol --broadcast, then write the real
+    # {chainId, stableUsd, paymentProcessor, deployBlock} to /out/addresses.local.json.
+    #
+    # Until then this writes a PLACEHOLDER marked `"placeholder": true`. That flag exists because
+    # `depends_on: service_completed_successfully` is satisfied by any zero exit — a deployer that
+    # silently produces nothing looks identical to one that worked. Consumers must refuse to start
+    # on a placeholder rather than quietly indexing the zero address.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        echo '{"placeholder":true,"chainId":31337,"stableUsd":"0x0000000000000000000000000000000000000000","paymentProcessor":"0x0000000000000000000000000000000000000000","deployBlock":0}' > /out/addresses.local.json
+        echo "[deployer] wrote PLACEHOLDER addresses — real deployment lands in Phase 2"
 
   # ── Data ───────────────────────────────────────────────────
   postgres:
     image: postgres:17-alpine
     <<: *default-env
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-chainstake}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chainstake}
-      POSTGRES_DB: ${POSTGRES_DB:-chainstake}
+      POSTGRES_USER: ${POSTGRES_USER:-ledgerline}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ledgerline}
+      POSTGRES_DB: ${POSTGRES_DB:-ledgerline}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chainstake}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ledgerline}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  # ── Indexer (engine + API) ─────────────────────────────────
+  # ── Mock PSP (the fiat rail + the chaos harness) ───────────
+  # Not a toy: this is what makes every failure mode in docs/failure-modes.md group A a tested
+  # behaviour rather than a claim. It is also what lets CI run the fiat rail offline with no
+  # secrets. See apps/mock-psp/README.md for the fault-injection API.
+  mock-psp:
+    build:
+      context: ..
+      dockerfile: apps/mock-psp/Dockerfile
+    <<: *default-env
+    ports:
+      - "4001:4001"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://localhost:4001/_health'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # ── Indexer (ingest · ledger · sagas · chain writer · API) ──
   indexer:
     build:
       context: ..
@@ -80,6 +114,8 @@ services:
         condition: service_healthy
       deployer:
         condition: service_completed_successfully
+      mock-psp:
+        condition: service_healthy
     volumes:
       - shared-addresses:/shared-addresses:ro
 
@@ -102,14 +138,14 @@ services:
     <<: *default-env
     profiles: ["demo"]
     depends_on:
-      anvil:
+      indexer:
+        condition: service_started
+      mock-psp:
         condition: service_healthy
-      deployer:
-        condition: service_completed_successfully
 
   # ── Observability ──────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.1.0
     command:
       - --config.file=/etc/prometheus/prometheus.yml
     ports:
@@ -121,7 +157,7 @@ services:
       - indexer
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.5.1
     ports:
       - "3002:3000"
     environment:
@@ -135,7 +171,7 @@ services:
       - prometheus
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: otel/opentelemetry-collector-contrib:0.119.0
     command: ["--config=/etc/otel/config.yaml"]
     volumes:
       - ./otel/otel-collector-config.yaml:/etc/otel/config.yaml:ro
@@ -146,23 +182,23 @@ services:
       - jaeger
 
   jaeger:
-    image: jaegertracing/all-in-one:latest
+    image: jaegertracing/all-in-one:1.65.0
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
       - "16686:16686" # UI
 
   alertmanager:
-    image: prom/alertmanager:latest
+    image: prom/alertmanager:v0.28.0
     volumes:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     ports:
       - "9093:9093"
 
   postgres-exporter:
-    image: quay.io/prometheuscommunity/postgres-exporter:latest
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
     environment:
-      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-chainstake}:${POSTGRES_PASSWORD:-chainstake}@postgres:5432/${POSTGRES_DB:-chainstake}?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-ledgerline}:${POSTGRES_PASSWORD:-ledgerline}@postgres:5432/${POSTGRES_DB:-ledgerline}?sslmode=disable"
     depends_on:
       postgres:
         condition: service_healthy

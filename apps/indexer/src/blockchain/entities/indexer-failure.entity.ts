@@ -5,7 +5,7 @@
  *   id (pk), raw_event_id (fk), event_name, user_address, error, attempts, next_retry_at,
  *   status ('failed' | 'retrying' | 'resolved'), created_at, updated_at.
  * The retry job re-runs a user's failed events IN ORDER, with capped attempts, and alerts
- * on funds events (chainstake_events_failed_total).
+ * on funds events (ledgerline_events_failed_total).
  */
 
 export {};

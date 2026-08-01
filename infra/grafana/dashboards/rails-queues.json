@@ -1,0 +1,33 @@
+{
+  "__comment": "Dashboard 4 - Rails & Queues. TODO(Phase 7): psp_request_duration_seconds by operation, fiat_event_lag_seconds, unmatched_fiat_events, webhook_signature_failures_total, psp_clock_skew_seconds, outbox_depth by kind/status, outbox_oldest_pending_seconds, screening_checks_total by gate/decision.",
+  "title": "Ledgerline \u2014 Rails & Queues",
+  "uid": "ledgerline-rails-queues",
+  "tags": ["ledgerline", "fiat", "outbox", "compliance"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "type": "text",
+      "title": "Placeholder",
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "PSP latency, webhook lag, outbox depth, screening decisions by gate. Built in **Phase 7**."
+      }
+    }
+  ]
+}

@@ -1,43 +1,33 @@
-# @chainstake/indexer
+# @ledgerline/indexer
 
-NestJS service: the **indexing engine**, the **read API**, and **admin** operations.
+The core service. Ingests **both** source-of-truth logs, orchestrates the sagas, owns the ledger,
+writes to the chain, and serves the read API.
 
-## Structure
+## Modules
 
-```
-src/
-├── blockchain/
-│   ├── core/         ChainClient, LogFetcher, AdaptiveChunker, SyncStateService,
-│   │                 ReorgGuardService, IndexerService (the runChunk loop)
-│   ├── events/       @OnChainEvent decorator, EventRegistryService, handlers (Staked, Withdrawn)
-│   ├── entities/     TypeORM entities: raw_events, sync_state, indexer_failures,
-│   │                 staking_records, user_balances, contract_status
-│   ├── migrations/   TypeORM migrations
-│   └── data-source.ts
-├── api/              read endpoints: /users/:address/{balance,history}, /stats, /health/indexer
-├── admin/            ReplayService, ReconciliationService, guarded admin endpoints
-├── observability/    otel.ts (imported first!), MetricsService, logger
-├── app.module.ts
-└── main.ts
-```
+| Module           | What                                                                           |
+| ---------------- | ------------------------------------------------------------------------------ |
+| `blockchain/`    | On-chain ingest: `runChunk` loop, adaptive chunking, reorg guard, `raw_events` |
+| `fiat/`          | Off-chain ingest: webhook endpoint, `fiat_events`, dispatcher, PSP adapters    |
+| `ledger/`        | Double-entry ledger. The **only** writer of `ledger_entries`                   |
+| `sagas/`         | On-ramp, refund, payout orchestrators                                          |
+| `chain-writer/`  | Signer port, signing policy, transaction submitter, receipt watcher            |
+| `outbox/`        | Transactional outbox, `FOR UPDATE SKIP LOCKED`                                 |
+| `compliance/`    | Three screening ports, gates at `pre_credit` / `pre_payout` / `periodic`       |
+| `admin/`         | Replay, reconciliation, operator commands                                      |
+| `api/`           | Read API. Projections only                                                     |
+| `observability/` | OTel bootstrap, metrics, logger                                                |
 
-## Local dev
+## Commands
 
 ```bash
-pnpm --filter @chainstake/indexer start:dev
+pnpm start:dev
+pnpm migration:generate --name AddSomething
+pnpm migration:run
+pnpm test
 ```
 
-Requires a reachable Postgres and RPC endpoint (see root `.env.example`). The full stack runs via
-`make demo` from the repo root.
+## The rule to remember
 
-## Build order (per phase)
-
-Follow `docs/build-plan.md`. Every source file here is a **stub** with a `TODO(Phase N)` marker
-describing what fills it in. Work rhythm: **make it work → make it correct → make it observable → commit.**
-
-## Key invariants
-
-- `raw_events` is append-only and idempotent (`UNIQUE(chain_id, tx_hash, log_index)`).
-- Cursor advance + inserts happen in one transaction.
-- `user_balances` is aggregate-recomputed (order-independent), never incremented.
-- Metric labels stay low-cardinality — no addresses or tx hashes as labels.
+**Nothing is credited on a hint.** Receipts, `200`s and optimistic writes are hints. Sagas advance
+only on indexed, confirmed events — with one exception, a revert, which drives compensation only.

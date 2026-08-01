@@ -11,7 +11,7 @@ alerting:
         - targets: ["alertmanager:9093"]
 
 scrape_configs:
-  - job_name: chainstake-indexer
+  - job_name: ledgerline-indexer
     metrics_path: /metrics
     static_configs:
       - targets: ["indexer:3001"]

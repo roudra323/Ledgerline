@@ -9,7 +9,7 @@ optimizer = true
 optimizer_runs = 200
 via_ir = false
 fs_permissions = [{ access = "read-write", path = "./" }]
-gas_reports = ["StakingVault", "MockToken"]
+gas_reports = ["StableUSD", "PaymentProcessor"]
 
 [fmt]
 line_length = 100

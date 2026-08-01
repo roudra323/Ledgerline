@@ -1,4 +1,10 @@
 {
   "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // tsconfig.json sets rootDir "./" so `tsc --noEmit` also typechecks test/. For the BUILD it
+    // must be "./src", otherwise tsc preserves the directory structure and emits dist/src/main.js
+    // while the Dockerfile CMD and start:prod both point at dist/main.js.
+    "rootDir": "./src"
+  },
   "exclude": ["node_modules", "dist", "test", "**/*.spec.ts", "**/*.e2e-spec.ts"]
 }

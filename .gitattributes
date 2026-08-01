@@ -1,0 +1,21 @@
+# Normalize line endings to LF across platforms.
+* text=auto eol=lf
+
+# Binary files — never diff or normalize.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+
+# Generated / vendored — collapse in diffs and exclude from language stats.
+pnpm-lock.yaml linguist-generated=true -diff
+packages/shared/src/abis/** linguist-generated=true
+packages/contracts/out/** linguist-generated=true
+packages/contracts/lib/** linguist-vendored=true
+
+# Solidity is a first-class language in this repo (GitHub linguist).
+*.sol linguist-language=Solidity

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
-  "display": "ChainStake base",
+  "display": "Ledgerline base",
   "compilerOptions": {
     "target": "ES2022",
     "module": "NodeNext",

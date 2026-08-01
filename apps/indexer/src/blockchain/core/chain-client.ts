@@ -1,12 +1,12 @@
 /**
- * ChainClient — viem public client wrapper.
+ * ChainClient — the viem public client.
  *
- * TODO(Phase 1): single-transport public client (http(RPC_URL_PRIMARY)).
- * TODO(Phase 2): swap to viem `fallback([primary, fallback])` for RPC failover; expose
- *   provider health so the RPC metrics (chainstake_rpc_*) can be emitted.
+ * TODO(Phase 1): createPublicClient with fallback([primary, secondary]) so a provider outage is
+ *   survivable; wrap calls to emit ledgerline_rpc_* metrics per provider.
  *
- * Responsibilities: getBlockNumber(), getBlock(hash|number), getLogs(range, address, events),
- *   readContract(totalStaked) for the reconciliation audit.
+ * TODO(Phase 11): the second provider is NOT decoration. Before any irreversible fiat action the
+ *   confirming block hash is cross-checked against it; disagreement holds the payout and fires
+ *   RpcDisagreement (failure mode B10). If that check is ever cut, cut anvil2 from compose too.
  */
 
 export {};

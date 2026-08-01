@@ -1,0 +1,33 @@
+{
+  "__comment": "Dashboard 3 - Chain Writer. TODO(Phase 7): chain_tx_inflight by role, confirmed vs reverted by reason_class, chain_tx_confirmation_seconds histogram, rebroadcasts, nonce_gap_depth, chain_tx_stuck, chain_account_balance_wei by role, gas_spent_wei_total, minter_allowance_remaining_minor.",
+  "title": "Ledgerline \u2014 Chain Writer",
+  "uid": "ledgerline-chain-writer",
+  "tags": ["ledgerline", "chain"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "type": "text",
+      "title": "Placeholder",
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Submission, confirmation, escalation and nonce health. Built in **Phase 7**."
+      }
+    }
+  ]
+}

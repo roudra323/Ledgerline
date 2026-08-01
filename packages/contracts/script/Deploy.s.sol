@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.28;
+pragma solidity 0.8.28;
 
-// TODO(Phase 0): import {Script} from "forge-std/Script.sol"; import contracts.
-
-/// @notice Deploys MockToken + StakingVault to the target RPC and writes the resulting addresses
-///         + deploy block to packages/shared/src/addresses.local.json (consumed by the indexer).
-/// TODO(Phase 0):
-///   - vm.startBroadcast(); deploy MockToken; deploy StakingVault(mockToken); stopBroadcast.
-///   - vm.writeJson(...) the addresses so `make chain` produces a ready-to-index environment.
-contract DeployScript {
-    // contract DeployScript is Script { function run() external { ... } }
-
-    }
+/// @title Deploy — deterministic local deployment for the demo stack.
+/// @dev TODO(Phase 2):
+///        - vm.startBroadcast()
+///        - deploy StableUSD (6 decimals, symbol USDX)
+///        - deploy PaymentProcessor(stableUsd)
+///        - configureMinter(treasury, INITIAL_MINTER_ALLOWANCE)  — a SAFETY LIMIT, sized
+///          deliberately, not "large enough to never think about"
+///        - grant OPERATOR_ROLE on PaymentProcessor to the hot_payout account
+///        - mint the initial treasury float (see ADR-0013: settlement transfers from a FINITE
+///          treasury; it does not mint per payment)
+///        - vm.stopBroadcast()
+///        - write {chainId, stableUsd, paymentProcessor, deployBlock} to the shared volume as
+///          addresses.local.json, consumed by packages/shared/src/addresses.ts
+contract DeployScript {}

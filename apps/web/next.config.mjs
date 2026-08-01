@@ -2,7 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   output: "standalone", // slim Docker image (see Dockerfile)
-  transpilePackages: ["@chainstake/shared"],
+  transpilePackages: ["@ledgerline/shared"],
 };
 
 export default nextConfig;

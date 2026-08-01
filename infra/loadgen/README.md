@@ -1,14 +1,15 @@
-# @chainstake/loadgen
+# loadgen
 
-A small but **first-class** deliverable: it fires randomized stake/withdraw/claim transactions
-against Anvil so the Grafana dashboards and Jaeger traces have living data during demos. Empty
-dashboards kill a demo — this is what makes the screenshots look real.
+Drives real payment traffic against the API so the dashboards have living data. **A first-class
+deliverable, not an afterthought** — an observability stack with no traffic proves nothing, and
+"Grafana with flat lines" is the most common way a demo like this falls flat.
 
-Runs under the `demo` compose profile:
+What it does (Phase 7):
 
-```bash
-make demo   # docker compose --profile demo up
-```
+- `POST /payment-intents` across N merchants and customers at a configurable rate
+- a weighted action mix: mostly on-ramp, some refunds (including partials), some payouts
+- **replays a small fraction of requests with the same idempotency key**, so the dedupe path is
+  exercised continuously rather than only in tests
+- periodically calls the `mock-psp` fault API, so the _failure_ paths show up in the demo too
 
-Config via env (see root `.env.example`): `RPC_URL_PRIMARY`, `DEV_MNEMONIC`, contract addresses.
-Implemented in **Phase 5**.
+Runs as a compose service under `--profile demo`.

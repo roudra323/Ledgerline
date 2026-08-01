@@ -1,0 +1,42 @@
+# Root build context ignore. All service Dockerfiles build with `context: ..` (repo root),
+# so this file governs what gets sent into every image build. Keep the context lean.
+
+# Dependencies (reinstalled inside the image)
+**/node_modules
+
+# Build output
+**/dist
+**/build
+**/.next
+**/out
+**/*.tsbuildinfo
+
+# Foundry artifacts
+packages/contracts/out
+packages/contracts/cache
+packages/contracts/broadcast
+packages/contracts/lib
+
+# VCS / CI / editor
+.git
+.github
+.husky
+.vscode
+.idea
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Coverage / logs
+**/coverage
+**/*.log
+
+# Docs & meta (not needed at runtime)
+docs
+*.md
+!apps/*/README.md
+
+# OS noise
+**/.DS_Store

@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 
 export const metadata = {
-  title: "ChainStake",
-  description: "Event-sourced staking demo — balances derived from on-chain events.",
+  title: "Ledgerline",
+  description: "A fiat ⇄ stablecoin payment rail with a real double-entry ledger.",
 };
 
-// TODO(Phase 5): wrap children in WagmiProvider + QueryClientProvider (config in app/providers.tsx).
+// TODO(Phase 6): wrap children in QueryClientProvider (config in app/providers.tsx).
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">

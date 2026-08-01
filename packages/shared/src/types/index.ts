@@ -1,16 +1,50 @@
-// Shared domain types used across services.
-// TODO(Phase 1): flesh out as the schema stabilizes. Kept deliberately small.
+/**
+ * Shared domain types. Kept deliberately small — this package is the cross-workspace contract,
+ * not a dumping ground.
+ */
 
 export type Address = `0x${string}`;
 export type Hex = `0x${string}`;
 
-export type ContractName = "StakingVault" | "MockToken";
+/**
+ * Every amount in this system is an integer in the MINOR UNIT of a named asset, carried as a
+ * string. Never a JS `number`. See docs/decisions/0001-money-representation.md.
+ */
+export type AmountMinor = string;
 
-export type StakingEventName = "Staked" | "Withdrawn" | "RewardsClaimed" | "Paused" | "Unpaused";
+export type AssetCode = "USD" | "USDX" | "ETH";
+export type AssetKind = "fiat" | "token" | "native";
+
+export interface Asset {
+  readonly code: AssetCode;
+  readonly kind: AssetKind;
+  /** Scale belongs to the asset, never to a row. */
+  readonly decimals: number;
+}
+
+export type ContractName = "StableUSD" | "PaymentProcessor";
+
+/** Events the indexer registers handlers for. Must match the ABIs in ./abis. */
+export type StableUsdEventName =
+  | "Transfer"
+  | "Mint"
+  | "Burn"
+  | "MinterConfigured"
+  | "MinterRemoved"
+  | "Blacklisted"
+  | "UnBlacklisted"
+  | "AuthorizationUsed"
+  | "Pause"
+  | "Unpause";
+
+export type PaymentProcessorEventName =
+  "PaymentSettled" | "PaymentRefunded" | "PayoutRequested" | "FeeConfigChanged";
+
+export type OnChainEventName = StableUsdEventName | PaymentProcessorEventName;
 
 export interface DeployedAddresses {
-  chainId: number;
-  stakingVault: Address;
-  mockToken: Address;
-  deployBlock: number;
+  readonly chainId: number;
+  readonly stableUsd: Address;
+  readonly paymentProcessor: Address;
+  readonly deployBlock: number;
 }

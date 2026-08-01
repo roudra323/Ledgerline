@@ -1,8 +1,8 @@
 {
-  "name": "@chainstake/contracts",
+  "name": "@ledgerline/contracts",
   "version": "0.1.0",
   "private": true,
-  "description": "ChainStake Solidity contracts (Foundry): StakingVault + MockToken.",
+  "description": "Ledgerline Solidity contracts (Foundry): StableUSD + PaymentProcessor.",
   "license": "MIT",
   "scripts": {
     "build": "forge build",

@@ -1,8 +1,8 @@
 {
-  "name": "@chainstake/loadgen",
+  "name": "@ledgerline/loadgen",
   "version": "0.1.0",
   "private": true,
-  "description": "Fires randomized stake/withdraw txs against Anvil so dashboards have living data.",
+  "description": "Drives randomized payment traffic (on-ramp, refund, payout) so dashboards have living data.",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -11,7 +11,7 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@chainstake/shared": "workspace:*",
+    "@ledgerline/shared": "workspace:*",
     "viem": "^2.21.0"
   },
   "devDependencies": {

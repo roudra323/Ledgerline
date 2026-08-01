@@ -12,11 +12,11 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/shared/package.json packages/shared/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile --filter @chainstake/web...
+    pnpm install --frozen-lockfile --filter @ledgerline/web...
 
 FROM deps AS build
 COPY . .
-RUN pnpm --filter @chainstake/web build
+RUN pnpm --filter @ledgerline/web build
 
 # Next standalone bundle -> minimal runtime image.
 FROM node:22-slim AS runtime

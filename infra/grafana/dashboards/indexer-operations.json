@@ -1,8 +1,8 @@
 {
-  "__comment": "Dashboard 1 — Indexer Operations. TODO(Phase 3): build panels (lag blocks/seconds per sync_key, chain head vs cursor, events/min by event_name, chunk duration heatmap by phase, adaptive chunk size, failed/retried events, reorg counter, reconciliation drift stat, RPC p95/error rate).",
-  "title": "ChainStake — Indexer Operations",
-  "uid": "chainstake-indexer-ops",
-  "tags": ["chainstake", "indexer"],
+  "__comment": "Dashboard 1 — Indexer Operations. TODO(Phase 7): build panels (lag blocks/seconds per sync_key, chain head vs cursor, events/min by event_name, chunk duration heatmap by phase, adaptive chunk size, failed/retried events, reorg counter, reconciliation drift stat, RPC p95/error rate).",
+  "title": "Ledgerline — Indexer Operations",
+  "uid": "ledgerline-indexer-ops",
+  "tags": ["ledgerline", "indexer"],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -16,7 +16,7 @@
       "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
       "options": {
         "mode": "markdown",
-        "content": "Provisioned dashboard stub. Panels are built in **Phase 3** — see docs/observability.md."
+        "content": "Provisioned dashboard stub. Panels are built in **Phase 7** — see docs/observability.md."
       }
     }
   ]

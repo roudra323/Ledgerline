@@ -14,14 +14,14 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/indexer/package.json apps/indexer/package.json
 COPY packages/shared/package.json packages/shared/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile --filter @chainstake/indexer...
+    pnpm install --frozen-lockfile --filter @ledgerline/indexer...
 
 # ── Build ────────────────────────────────────────────────────
 FROM deps AS build
 COPY . .
-RUN pnpm --filter @chainstake/indexer... build
+RUN pnpm --filter @ledgerline/indexer... build
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm --filter @chainstake/indexer deploy --prod /app
+    pnpm --filter @ledgerline/indexer deploy --prod /app
 
 # ── Runtime (slim, non-root) ─────────────────────────────────
 FROM node:22-slim AS runtime

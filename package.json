@@ -1,8 +1,8 @@
 {
-  "name": "chainstake",
+  "name": "ledgerline",
   "version": "0.1.0",
   "private": true,
-  "description": "Production-grade event-driven staking indexer (NestJS + viem + PostgreSQL) with a full observability stack.",
+  "description": "A fiat <-> stablecoin payment rail: two append-only logs, one double-entry ledger, a crash-safe chain write path.",
   "license": "MIT",
   "packageManager": "pnpm@10.26.0",
   "engines": {
@@ -17,7 +17,7 @@
     "format:check": "prettier --check .",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "contracts:test": "pnpm --filter @chainstake/contracts test",
+    "contracts:test": "pnpm --filter @ledgerline/contracts test",
     "up": "docker compose -f infra/docker-compose.yml up -d",
     "down": "docker compose -f infra/docker-compose.yml down",
     "demo": "docker compose -f infra/docker-compose.yml --profile demo up"

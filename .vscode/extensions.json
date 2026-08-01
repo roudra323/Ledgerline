@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint",
+    "editorconfig.editorconfig",
+    "nomicfoundation.hardhat-solidity",
+    "ms-azuretools.vscode-docker",
+    "redhat.vscode-yaml"
+  ]
+}

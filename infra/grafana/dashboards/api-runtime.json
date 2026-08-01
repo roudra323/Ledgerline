@@ -1,8 +1,8 @@
 {
-  "__comment": "Dashboard 2 — API & Runtime (APM). TODO(Phase 3): RED per route (rate, error %, p50/p95/p99), Apdex stat, event loop lag, heap, GC pauses, DB pool saturation, and panel links to Jaeger for the visible time window.",
-  "title": "ChainStake — API & Runtime (APM)",
-  "uid": "chainstake-api-runtime",
-  "tags": ["chainstake", "api", "apm"],
+  "__comment": "Dashboard 2 — API & Runtime (APM). TODO(Phase 7): RED per route (rate, error %, p50/p95/p99), Apdex stat, event loop lag, heap, GC pauses, DB pool saturation, and panel links to Jaeger for the visible time window.",
+  "title": "Ledgerline — API & Runtime (APM)",
+  "uid": "ledgerline-api-runtime",
+  "tags": ["ledgerline", "api", "apm"],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -16,7 +16,7 @@
       "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
       "options": {
         "mode": "markdown",
-        "content": "Provisioned dashboard stub. Panels are built in **Phase 3** — see docs/observability.md."
+        "content": "Provisioned dashboard stub. Panels are built in **Phase 7** — see docs/observability.md."
       }
     }
   ]

@@ -1,9 +1,9 @@
 apiVersion: 1
 
 providers:
-  - name: ChainStake
+  - name: Ledgerline
     orgId: 1
-    folder: ChainStake
+    folder: Ledgerline
     type: file
     disableDeletion: false
     editable: true

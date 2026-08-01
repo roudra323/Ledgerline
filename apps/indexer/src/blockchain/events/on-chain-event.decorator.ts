@@ -1,22 +1,22 @@
-/**
- * @OnChainEvent — marks a provider method/class as the handler for a specific contract event.
- *
- * Usage (Phase 1):
- *   @OnChainEvent({ contract: "StakingVault", event: "Staked" })
- *   export class StakedHandler { async handle(event: DecodedEvent) { ... } }
- *
- * TODO(Phase 1): implement as a metadata-setting decorator (Reflect.defineMetadata) so
- *   EventRegistryService can discover handlers via Nest DiscoveryService at boot.
- */
+import "reflect-metadata";
+import type { ContractName, OnChainEventName } from "@ledgerline/shared";
 
-export const ON_CHAIN_EVENT = Symbol("chainstake:on-chain-event");
+export const ON_CHAIN_EVENT = Symbol("ledgerline:on-chain-event");
 
 export interface OnChainEventMeta {
-  contract: string;
-  event: string;
+  readonly contract: ContractName;
+  readonly event: OnChainEventName;
 }
 
-export function OnChainEvent(_meta: OnChainEventMeta): ClassDecorator {
-  // TODO(Phase 1): Reflect.defineMetadata(ON_CHAIN_EVENT, _meta, target)
-  return () => undefined;
+/**
+ * Marks a class as the handler for exactly one on-chain event. EventRegistry discovers these at
+ * boot via Nest DiscoveryService and validates loudly: a duplicate handler, or a handler for an
+ * event not in the registry, CRASHES STARTUP. Config errors fail at boot; runtime errors isolate.
+ *
+ * TODO(Phase 4): EventRegistry consumes this metadata.
+ */
+export function OnChainEvent(meta: OnChainEventMeta): ClassDecorator {
+  return (target) => {
+    Reflect.defineMetadata(ON_CHAIN_EVENT, meta, target);
+  };
 }

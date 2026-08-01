@@ -26,6 +26,11 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      # `pnpm typecheck` fans out to every workspace, and @ledgerline/contracts typechecks by
+      # compiling Solidity. Without Foundry on PATH this job fails at the contracts package.
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: forge install --no-git foundry-rs/forge-std OpenZeppelin/openzeppelin-contracts
+        working-directory: packages/contracts
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
@@ -36,9 +41,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - uses: foundry-rs/foundry-toolchain@v1
+      # Foundry deps live in lib/ (git-ignored) and are installed here, not committed.
+      # Pin versions once they're chosen in Phase 0 (e.g. --no-commit @<tag>).
+      - name: Install contract dependencies
+        working-directory: packages/contracts
+        run: |
+          forge install foundry-rs/forge-std
+          forge install OpenZeppelin/openzeppelin-contracts
       - name: forge build
         working-directory: packages/contracts
         run: forge build --sizes

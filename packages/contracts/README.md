@@ -1,32 +1,36 @@
-# @chainstake/contracts
+# @ledgerline/contracts
 
-Foundry project for the ChainStake staking contracts.
+Foundry project for the Ledgerline payment contracts.
 
 ## Contracts
 
-- **`StakingVault.sol`** — `stake()`, `withdraw()`, `claimRewards()`, owner `pause()/unpause()`,
-  simple linear reward accrual. Emits self-contained events (`Staked`, `Withdrawn`,
-  `RewardsClaimed`, `Paused`, `Unpaused`) carrying amount **and** resulting total.
-- **`MockToken.sol`** — ERC20 staking asset with an open `mint` for dev/tests/loadgen.
+- **`StableUSD.sol`** (USDX) — a FiatToken-shaped issuer stablecoin: 6 decimals, minter
+  allowances, blacklist, pause, EIP-2612 `permit`, EIP-3009 authorized transfers.
+- **`PaymentProcessor.sol`** — settlement, refund and payout routing. **A conduit, never a vault:**
+  `token.balanceOf(processor) == 0` after every action.
 
-## Setup
+## The two invariants that matter
+
+Everything else here is convenience. These two are the only things standing between a server bug
+and a double payment (see [ADR-0009](../../docs/decisions/0009-on-chain-vs-off-chain.md)):
+
+1. `settle()` reverts `PaymentAlreadySettled` if the payment id exists — a duplicate submission
+   from a crashed-and-restarted submitter can never double-pay a merchant.
+2. `refunded + amount <= captured`, else `RefundExceedsCapture` — partial-refund overrun is
+   impossible even if every off-chain check is wrong.
+
+## Commands
 
 ```bash
-# Install dependencies (populates lib/ — git-ignored)
-forge install foundry-rs/forge-std
-forge install OpenZeppelin/openzeppelin-contracts
-
 forge build
 forge test -vvv
-forge test --match-test invariant -vvv   # invariant: sum(stakes) == token.balanceOf(vault)
+forge test --match-test invariant -vvv   # both invariant suites
+forge fmt
 ```
 
-## Deploy locally
+## Note on EIP-3009
 
-```bash
-anvil --block-time 2 --mnemonic "test test test test test test test test test test test junk"
-pnpm --filter @chainstake/contracts deploy:local
-# writes addresses -> packages/shared/src/addresses.local.json
-```
-
-> Contracts are currently **stubs** (`TODO(Phase 0)` markers). See `docs/build-plan.md` Phase 0.
+Merchant payments use **`receiveWithAuthorization`**, not `transferWithAuthorization`. The latter
+can be front-run by anyone who sees the signed authorization in the mempool, which grief-fails the
+intended relayer's transaction and desynchronizes the saga. `receiveWithAuthorization` requires
+`msg.sender == to`, so only `PaymentProcessor` can execute it.

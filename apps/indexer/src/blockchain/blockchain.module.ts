@@ -1,17 +1,11 @@
-import { Module } from "@nestjs/common";
-
 /**
- * BlockchainModule — the indexing engine.
+ * BlockchainModule — on-chain ingest. One of the two source-of-truth logs.
  *
- * TODO(Phase 1): register providers:
- *   ChainClient, LogFetcher, SyncStateService, IndexerService,
- *   EventRegistryService, StakedHandler, WithdrawnHandler,
- *   and TypeOrmModule.forFeature([...entities]).
- * TODO(Phase 2): ReorgGuardService, AdaptiveChunker, ReconciliationService, retry job.
+ * The inherited event-sourced core, unchanged in shape: single parameterized runChunk() loop,
+ * adaptive chunking, per-key cursors, reorg guard, failure isolation, replay.
+ *
+ * TODO(Phase 4): re-point handlers at the payment contracts and apply the partial-unique-index
+ * fix from docs/decisions/0010-raw-events-partial-unique.md.
  */
-@Module({
-  imports: [],
-  providers: [],
-  exports: [],
-})
-export class BlockchainModule {}
+
+export {};
