@@ -1,4 +1,10 @@
 import { Module } from "@nestjs/common";
+import { ScheduleModule } from "@nestjs/schedule";
+import { TypeOrmModule } from "@nestjs/typeorm";
+
+import { HealthController } from "./api/health.controller";
+import { ConfigModule } from "./config/config.module";
+import { dataSourceOptions } from "./data-source";
 
 /**
  * Root module.
@@ -23,8 +29,8 @@ import { Module } from "@nestjs/common";
  * (failure mode B6). Config errors crash at startup; only runtime per-event errors isolate.
  */
 @Module({
-  imports: [],
-  controllers: [],
+  imports: [ConfigModule, TypeOrmModule.forRoot(dataSourceOptions), ScheduleModule.forRoot()],
+  controllers: [HealthController],
   providers: [],
 })
 export class AppModule {}

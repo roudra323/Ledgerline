@@ -4,7 +4,11 @@
     // tsconfig.json sets rootDir "./" so `tsc --noEmit` also typechecks test/. For the BUILD it
     // must be "./src", otherwise tsc preserves the directory structure and emits dist/src/main.js
     // while the Dockerfile CMD and start:prod both point at dist/main.js.
-    "rootDir": "./src"
+    "rootDir": "./src",
+    // Incremental is off here: the base config enables it, but with nest-cli's deleteOutDir the
+    // stale tsconfig.build.tsbuildinfo makes tsc skip emitting (silent incomplete dist/). A build
+    // must be a build — deterministic, cache-free. See infra note in tsconfig.base.json.
+    "incremental": false
   },
   "exclude": ["node_modules", "dist", "test", "**/*.spec.ts", "**/*.e2e-spec.ts"]
 }
