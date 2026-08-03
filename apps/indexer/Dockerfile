@@ -2,7 +2,7 @@
 # syntax=docker/dockerfile:1
 
 # ── Base: pnpm on Node 22 ────────────────────────────────────
-FROM node:22-slim AS base
+FROM node:26-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
@@ -24,7 +24,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm --filter @ledgerline/indexer deploy --prod /app
 
 # ── Runtime (slim, non-root) ─────────────────────────────────
-FROM node:22-slim AS runtime
+FROM node:26-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /app/dist ./dist
