@@ -1,5 +1,26 @@
+import { existsSync, readFileSync } from "fs";
+import { resolve } from "path";
+
 import "reflect-metadata";
 import { DataSource, type DataSourceOptions } from "typeorm";
+
+// Load root .env file using Node built-in fs if running via TypeORM CLI
+const envPath = resolve(__dirname, "../../../.env");
+if (existsSync(envPath)) {
+  const envContent = readFileSync(envPath, "utf8");
+  for (const line of envContent.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx > 0) {
+      const key = trimmed.slice(0, eqIdx).trim();
+      const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
+      if (!process.env[key]) {
+        process.env[key] = val;
+      }
+    }
+  }
+}
 
 /**
  * Standalone TypeORM DataSource — used by the CLI for migration:generate / migration:run,
