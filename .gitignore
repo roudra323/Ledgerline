@@ -44,3 +44,7 @@ pgdata/
 
 # Generated addresses (written at deploy time by the chain job)
 packages/shared/src/addresses.local.json
+
+# Others / scratch & social docs
+others/
+

@@ -35,6 +35,7 @@ packages/contracts/lib
 
 # Docs & meta (not needed at runtime)
 docs
+others
 *.md
 !apps/*/README.md
 

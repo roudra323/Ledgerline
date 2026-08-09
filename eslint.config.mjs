@@ -16,6 +16,7 @@ export default defineConfig([
       "**/coverage/**",
       "packages/contracts/**", // Solidity is linted by `forge fmt`
       "packages/shared/src/abis/**", // generated ABIs
+      "others/**",
     ],
   },
   eslint.configs.recommended,
