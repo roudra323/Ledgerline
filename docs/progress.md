@@ -3,11 +3,11 @@
 > **Update this file at the end of every block, in the same commit as the work.**
 > A tracker updated later is a tracker nobody trusts.
 
-**Overall: 11 / 76 blocks complete** — Phase 0 done, Part 1 in progress.
+**Overall: 13 / 76 blocks complete** — Phase 0 done, Part 1 in progress.
 
 ```
 Phase 0  ████████████████████  9/9    ✅ complete
-Part 1   ████░░░░░░░░░░░░░░░░  2/9    ← YOU ARE HERE
+Part 1   ████████░░░░░░░░░░░░  4/9    ← YOU ARE HERE
 Part 2   ░░░░░░░░░░░░░░░░░░░░  0/8
 Part 3   ░░░░░░░░░░░░░░░░░░░░  0/8
 Part 4   ░░░░░░░░░░░░░░░░░░░░  0/5
@@ -17,9 +17,9 @@ Part 7   ░░░░░░░░░░░░░░░░░░░░  0/5
 Parts 8–13                     0/20   (optional — see cut list)
 ```
 
-**Next action:** Block 1.2 — Double-entry concept (no code) / Block 1.3 — Ledger tables + entities
+**Next action:** Block 1.4 — Deferred balance constraint trigger (`trg_assert_ledger_transaction_balanced`)
 
-**Minimum shippable point:** end of **Part 7**. Everything after that is depth.
+**Minimum shippable point:** end of **Part 7**. Every thing after that is depth.
 
 ---
 
@@ -67,8 +67,8 @@ _The foundation. Nothing works if this is wrong._
 | ----- | ------------------------------------------------- | ------ | ---------- | ------- | -------------------------------------------------------------------------------------------------------------- |
 | 1.0   | App boots, connects to Postgres                   | ✅     | 2026-08-03 | 2a42ce9 | zod env fails loud at boot; `/health` does a real `SELECT 1`; `incremental:false` fixed a silent stale `dist/` |
 | 1.1   | `money.ts` — integer money, `splitFee`, `convert` | ✅     | 2026-08-04 |         | integer minor unit math, fee derivation, fast-check property tests passing (1000/1000 runs)                    |
-| 1.2   | Double-entry concept _(no code)_                  | ☐      |            |         |                                                                                                                |
-| 1.3   | Ledger tables + entities                          | ☐      |            |         |                                                                                                                |
+| 1.2   | Double-entry concept _(no code)_                  | ✅     | 2026-08-05 |         | Debits = Credits mental model, 4 account types                                                                 |
+| 1.3   | Ledger tables + entities                          | ✅     | 2026-08-05 |         | CreateLedgerTables migration + 5 TypeORM entities registered in LedgerModule                                   |
 | 1.4   | Deferred balance trigger                          | ☐      |            |         |                                                                                                                |
 | 1.5   | Immutability trigger + `reverses_id`              | ☐      |            |         |                                                                                                                |
 | 1.6   | `LedgerService.post()` — the single writer        | ☐      |            |         |                                                                                                                |
