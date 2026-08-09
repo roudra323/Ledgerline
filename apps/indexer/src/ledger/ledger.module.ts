@@ -1,14 +1,29 @@
-/**
- * LedgerModule — the double-entry ledger (docs/decisions/0004-double-entry-ledger.md).
- *
- * The only module permitted to write `ledger_transactions` / `ledger_entries`. Everything else
- * asks it to post; nothing else touches those tables.
- *
- * TODO(Phase 1):
- *   - entities: LedgerAccount, LedgerTransaction, LedgerEntry, LedgerAccountBalance.
- *   - LedgerService.post() — the single writer. Validates in app code for a good error message,
- *     then lets the deferred constraint trigger be the backstop.
- *   - TrialBalanceAuditor (invariant I2) on a 5-minute cron.
- */
+import { Module } from "@nestjs/common";
+import { TypeOrmModule } from "@nestjs/typeorm";
 
-export {};
+import { Asset } from "./entities/asset.entity";
+import { LedgerAccountBalance } from "./entities/ledger-account-balance.entity";
+import { LedgerAccount } from "./entities/ledger-account.entity";
+import { LedgerEntry } from "./entities/ledger-entry.entity";
+import { LedgerTransaction } from "./entities/ledger-transaction.entity";
+
+/**
+ * LedgerModule — the double-entry ledger engine.
+ *
+ * The ONLY module permitted to write `ledger_transactions` and `ledger_entries`.
+ * All other modules (Sagas, Ingest, Compliance) call LedgerService.post().
+ */
+@Module({
+  imports: [
+    TypeOrmModule.forFeature([
+      Asset,
+      LedgerAccount,
+      LedgerTransaction,
+      LedgerEntry,
+      LedgerAccountBalance,
+    ]),
+  ],
+  providers: [],
+  exports: [TypeOrmModule],
+})
+export class LedgerModule {}
