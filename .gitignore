@@ -48,3 +48,6 @@ packages/shared/src/addresses.local.json
 # Others / scratch & social docs
 others/
 
+# Learnings log (scratch material for the social series, not project docs)
+docs/learnings.md
+
