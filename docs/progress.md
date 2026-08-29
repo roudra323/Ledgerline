@@ -3,11 +3,11 @@
 > **Update this file at the end of every block, in the same commit as the work.**
 > A tracker updated later is a tracker nobody trusts.
 
-**Overall: 13 / 76 blocks complete** — Phase 0 done, Part 1 in progress.
+**Overall: 14 / 76 blocks complete** — Phase 0 done, Part 1 in progress.
 
 ```
 Phase 0  ████████████████████  9/9    ✅ complete
-Part 1   ████████░░░░░░░░░░░░  4/9    ← YOU ARE HERE
+Part 1   ██████████░░░░░░░░░░  5/9    ← YOU ARE HERE
 Part 2   ░░░░░░░░░░░░░░░░░░░░  0/8
 Part 3   ░░░░░░░░░░░░░░░░░░░░  0/8
 Part 4   ░░░░░░░░░░░░░░░░░░░░  0/5
@@ -17,7 +17,7 @@ Part 7   ░░░░░░░░░░░░░░░░░░░░  0/5
 Parts 8–13                     0/20   (optional — see cut list)
 ```
 
-**Next action:** Block 1.4 — Deferred balance constraint trigger (`trg_assert_ledger_transaction_balanced`)
+**Next action:** Block 1.5 — Immutability trigger + `reverses_id`
 
 **Minimum shippable point:** end of **Part 7**. Every thing after that is depth.
 
@@ -63,17 +63,17 @@ Complete. The pivot from staking to a payment rail.
 
 _The foundation. Nothing works if this is wrong._
 
-| Block | What                                              | Status | Date       | Commit  | Notes                                                                                                          |
-| ----- | ------------------------------------------------- | ------ | ---------- | ------- | -------------------------------------------------------------------------------------------------------------- |
-| 1.0   | App boots, connects to Postgres                   | ✅     | 2026-08-03 | 2a42ce9 | zod env fails loud at boot; `/health` does a real `SELECT 1`; `incremental:false` fixed a silent stale `dist/` |
-| 1.1   | `money.ts` — integer money, `splitFee`, `convert` | ✅     | 2026-08-04 |         | integer minor unit math, fee derivation, fast-check property tests passing (1000/1000 runs)                    |
-| 1.2   | Double-entry concept _(no code)_                  | ✅     | 2026-08-05 |         | Debits = Credits mental model, 4 account types                                                                 |
-| 1.3   | Ledger tables + entities                          | ✅     | 2026-08-05 |         | CreateLedgerTables migration + 5 TypeORM entities registered in LedgerModule                                   |
-| 1.4   | Deferred balance trigger                          | ☐      |            |         |                                                                                                                |
-| 1.5   | Immutability trigger + `reverses_id`              | ☐      |            |         |                                                                                                                |
-| 1.6   | `LedgerService.post()` — the single writer        | ☐      |            |         |                                                                                                                |
-| 1.7   | Balances projection + row lock                    | ☐      |            |         |                                                                                                                |
-| 1.8   | Trial-balance property test                       | ☐      |            |         |                                                                                                                |
+| Block | What                                              | Status | Date       | Commit  | Notes                                                                                                                  |
+| ----- | ------------------------------------------------- | ------ | ---------- | ------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 1.0   | App boots, connects to Postgres                   | ✅     | 2026-08-03 | 2a42ce9 | zod env fails loud at boot; `/health` does a real `SELECT 1`; `incremental:false` fixed a silent stale `dist/`         |
+| 1.1   | `money.ts` — integer money, `splitFee`, `convert` | ✅     | 2026-08-04 |         | integer minor unit math, fee derivation, fast-check property tests passing (1000/1000 runs)                            |
+| 1.2   | Double-entry concept _(no code)_                  | ✅     | 2026-08-05 |         | Debits = Credits mental model, 4 account types                                                                         |
+| 1.3   | Ledger tables + entities                          | ✅     | 2026-08-05 |         | CreateLedgerTables migration + 5 TypeORM entities registered in LedgerModule                                           |
+| 1.4   | Deferred balance trigger                          | ✅     | 2026-08-20 |         | `CONSTRAINT TRIGGER ... DEFERRABLE INITIALLY DEFERRED`; integration test proves COMMIT throws on an unbalanced USD leg |
+| 1.5   | Immutability trigger + `reverses_id`              | ☐      |            |         |                                                                                                                        |
+| 1.6   | `LedgerService.post()` — the single writer        | ☐      |            |         |                                                                                                                        |
+| 1.7   | Balances projection + row lock                    | ☐      |            |         |                                                                                                                        |
+| 1.8   | Trial-balance property test                       | ☐      |            |         |                                                                                                                        |
 
 **Part 1 exit:** 10k random postings → trial balance exactly 0 · `UPDATE ledger_entries` throws ·
 20 concurrent payouts against float for 10 → exactly 10 succeed.
@@ -222,12 +222,12 @@ Re-run before every commit. Update the date when you do.
 
 | Check       | Command                    | Last green                    |
 | ----------- | -------------------------- | ----------------------------- |
-| Lint        | `pnpm lint`                | 2026-08-03                    |
-| Typecheck   | `pnpm typecheck`           | 2026-08-03                    |
+| Lint        | `pnpm lint`                | 2026-08-20                    |
+| Typecheck   | `pnpm typecheck`           | 2026-08-20                    |
 | Format      | `pnpm format:check`        | 2026-08-03                    |
 | Contracts   | `pnpm contracts-test`      | — _(no tests yet, Part 2)_    |
 | Unit        | `pnpm test`                | — _(no tests yet, Block 1.1)_ |
-| Integration | `make test-integration`    | — _(no tests yet, Block 1.4)_ |
+| Integration | `pnpm test:integration`    | 2026-08-20 — balance trigger  |
 | Compose     | `docker compose config -q` | 2026-08-01                    |
 | Alert rules | `promtool check rules`     | 2026-08-01 — 25 rules         |
 
