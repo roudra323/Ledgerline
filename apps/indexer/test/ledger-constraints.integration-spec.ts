@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { DataSource } from "typeorm";
 
-import { dataSourceOptions } from "../src/data-source";
+import { appDataSourceOptions, dataSourceOptions } from "../src/data-source";
 
 /**
  * Proves the deferred balance trigger (Block 1.4) is load-bearing: the database itself
@@ -94,5 +94,160 @@ describe("ledger balance constraint trigger", () => {
       }
       await queryRunner.release();
     }
+  });
+
+  /**
+   * Posts one committed, balanced transaction to mutate against. Returns its id and its first
+   * entry's id. Both entries must land in ONE transaction — the balance trigger is deferred to
+   * COMMIT, so inserting them as two separate autocommit statements would let the first one
+   * commit alone and trip the Block 1.4 trigger before the second leg ever exists.
+   */
+  async function postBalancedTransaction(): Promise<{ transactionId: string; entryId: string }> {
+    const receivable = await accountId("1000");
+    const unsettled = await accountId("2100");
+
+    const queryRunner = dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const txResult = (await queryRunner.query(
+        `INSERT INTO ledger_transactions (kind, cause_type, cause_id)
+         VALUES ('payment_captured', 'test', $1)
+         RETURNING id`,
+        [`immutable-${Date.now()}-${Math.random()}`],
+      )) as { id: string }[];
+      const txRow = txResult[0];
+      if (!txRow) throw new Error("insert into ledger_transactions returned no row");
+      const transactionId = txRow.id;
+
+      const entryResult = (await queryRunner.query(
+        `INSERT INTO ledger_entries (transaction_id, account_id, direction, asset_code, amount_minor, sequence)
+         VALUES ($1, $2, 'debit', 'USD', 10000, 0)
+         RETURNING id`,
+        [transactionId, receivable],
+      )) as { id: string }[];
+      await queryRunner.query(
+        `INSERT INTO ledger_entries (transaction_id, account_id, direction, asset_code, amount_minor, sequence)
+         VALUES ($1, $2, 'credit', 'USD', 10000, 1)`,
+        [transactionId, unsettled],
+      );
+
+      await queryRunner.commitTransaction();
+
+      const entryRow = entryResult[0];
+      if (!entryRow) throw new Error("insert into ledger_entries returned no row");
+      return { transactionId, entryId: entryRow.id };
+    } finally {
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
+      }
+      await queryRunner.release();
+    }
+  }
+
+  describe("immutability trigger", () => {
+    it("rejects UPDATE on ledger_entries", async () => {
+      const { entryId } = await postBalancedTransaction();
+
+      await expect(
+        dataSource.query(`UPDATE ledger_entries SET amount_minor = 1 WHERE id = $1`, [entryId]),
+      ).rejects.toThrow(/immutable/i);
+    });
+
+    it("rejects DELETE on ledger_entries", async () => {
+      const { entryId } = await postBalancedTransaction();
+
+      await expect(
+        dataSource.query(`DELETE FROM ledger_entries WHERE id = $1`, [entryId]),
+      ).rejects.toThrow(/immutable/i);
+    });
+
+    it("rejects UPDATE on ledger_transactions", async () => {
+      const { transactionId } = await postBalancedTransaction();
+
+      await expect(
+        dataSource.query(`UPDATE ledger_transactions SET metadata = '{}' WHERE id = $1`, [
+          transactionId,
+        ]),
+      ).rejects.toThrow(/immutable/i);
+    });
+
+    it("rejects DELETE on ledger_transactions", async () => {
+      const { transactionId } = await postBalancedTransaction();
+
+      await expect(
+        dataSource.query(`DELETE FROM ledger_transactions WHERE id = $1`, [transactionId]),
+      ).rejects.toThrow(/immutable/i);
+    });
+  });
+
+  describe("least-privilege app role", () => {
+    let appDataSource: DataSource;
+
+    beforeAll(async () => {
+      appDataSource = new DataSource(appDataSourceOptions);
+      await appDataSource.initialize();
+    });
+
+    afterAll(async () => {
+      await appDataSource.destroy();
+    });
+
+    it("cannot UPDATE ledger_entries even before the trigger runs — REVOKE, not just the trigger, blocks it", async () => {
+      const { entryId } = await postBalancedTransaction();
+
+      await expect(
+        appDataSource.query(`UPDATE ledger_entries SET amount_minor = 1 WHERE id = $1`, [entryId]),
+      ).rejects.toThrow(/permission denied/i);
+    });
+
+    it("can still SELECT and INSERT as the app role", async () => {
+      const receivable = await accountId("1000");
+      const unsettled = await accountId("2100");
+
+      // Both entries in one transaction — same reason as postBalancedTransaction: the
+      // deferred balance trigger only sees all of a transaction's legs at COMMIT.
+      const queryRunner = appDataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+
+      let transactionId: string;
+      try {
+        const txResult = (await queryRunner.query(
+          `INSERT INTO ledger_transactions (kind, cause_type, cause_id)
+           VALUES ('payment_captured', 'test', $1)
+           RETURNING id`,
+          [`app-role-${Date.now()}`],
+        )) as { id: string }[];
+        const txRow = txResult[0];
+        if (!txRow) throw new Error("insert into ledger_transactions returned no row");
+        transactionId = txRow.id;
+
+        await queryRunner.query(
+          `INSERT INTO ledger_entries (transaction_id, account_id, direction, asset_code, amount_minor, sequence)
+           VALUES ($1, $2, 'debit', 'USD', 100, 0)`,
+          [transactionId, receivable],
+        );
+        await queryRunner.query(
+          `INSERT INTO ledger_entries (transaction_id, account_id, direction, asset_code, amount_minor, sequence)
+           VALUES ($1, $2, 'credit', 'USD', 100, 1)`,
+          [transactionId, unsettled],
+        );
+
+        await queryRunner.commitTransaction();
+      } finally {
+        if (queryRunner.isTransactionActive) {
+          await queryRunner.rollbackTransaction();
+        }
+        await queryRunner.release();
+      }
+
+      const rows = await appDataSource.query<{ id: string }[]>(
+        `SELECT id FROM ledger_entries WHERE transaction_id = $1`,
+        [transactionId],
+      );
+      expect(rows).toHaveLength(2);
+    });
   });
 });

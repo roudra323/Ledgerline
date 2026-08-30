@@ -1,4 +1,12 @@
-import { Column, Entity, Index, OneToMany, PrimaryGeneratedColumn } from "typeorm";
+import {
+  Column,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  OneToMany,
+  PrimaryGeneratedColumn,
+} from "typeorm";
 
 import { BaseAuditEntity } from "../../common/entities/base-audit.entity";
 
@@ -48,6 +56,18 @@ export class LedgerTransaction extends BaseAuditEntity {
 
   @Column({ name: "metadata", type: "jsonb", nullable: true })
   metadata!: Record<string, unknown> | null;
+
+  /**
+   * When set, this transaction is a correction that nullifies an earlier transaction.
+   * Corrections are ALWAYS new, opposite transactions — never edits to the original row.
+   * The database enforces this: UPDATE/DELETE on ledger_transactions throws (Block 1.5).
+   */
+  @Column({ name: "reverses_id", type: "uuid", nullable: true })
+  reversesId!: string | null;
+
+  @ManyToOne(() => LedgerTransaction, { nullable: true, onDelete: "RESTRICT" })
+  @JoinColumn({ name: "reverses_id" })
+  reversesTransaction!: LedgerTransaction | null;
 
   @OneToMany(() => LedgerEntry, (entry) => entry.transaction)
   entries!: LedgerEntry[];

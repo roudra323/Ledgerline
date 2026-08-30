@@ -19,6 +19,13 @@ export const envSchema = z.object({
       message: "DATABASE_URL is required to start the indexer service",
     })
     .min(1, "DATABASE_URL cannot be empty"),
+  // Least-privilege runtime role (Block 1.5) — DATABASE_URL above is the table owner, CLI-only.
+  // A table owner always bypasses REVOKE, so the app must connect as a non-owner for that to work.
+  APP_DATABASE_URL: z
+    .url({
+      message: "APP_DATABASE_URL is required to start the indexer service",
+    })
+    .min(1, "APP_DATABASE_URL cannot be empty"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 });
 

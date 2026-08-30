@@ -37,8 +37,11 @@ if (!process.env.DATABASE_URL && existsSync(rootEnvPath)) {
 const env = validateEnv(process.env);
 
 /**
- * Standalone TypeORM DataSource — used by the CLI for migration:generate / migration:run,
- * and its options are reused by TypeOrmModule.forRoot in AppModule.
+ * Standalone TypeORM DataSource — used by the CLI for migration:generate / migration:run.
+ *
+ * Connects as the table-owning role (`DATABASE_URL`). Owners always bypass Postgres
+ * REVOKE, which is exactly why the running app must NOT use this DataSource — see
+ * `appDataSourceOptions` below and Block 1.5's immutability migration.
  *
  * Entities live under several modules (ledger, sagas, fiat, chain-writer, blockchain), so the
  * glob spans them all. Migrations are shared and live at `src/migrations`.
@@ -53,3 +56,14 @@ export const dataSourceOptions: DataSourceOptions = {
 };
 
 export const AppDataSource = new DataSource(dataSourceOptions);
+
+/**
+ * Options for TypeOrmModule.forRoot() in AppModule — the connection the running app actually
+ * uses. Connects as the least-privilege `ledgerline_app` role (`APP_DATABASE_URL`), which
+ * cannot UPDATE or DELETE ledger_entries/ledger_transactions at the database level, regardless
+ * of what application code does or forgets to do.
+ */
+export const appDataSourceOptions: DataSourceOptions = {
+  ...dataSourceOptions,
+  url: env.APP_DATABASE_URL,
+};

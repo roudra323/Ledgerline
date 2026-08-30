@@ -60,7 +60,11 @@ ledger. Every balance is a projection. See `docs/architecture.md` for the design
 
 ## Conventions
 
-> **Read [`docs/conventions.md`](docs/conventions.md) before writing code — it is binding.**
+> **Before writing or editing ANY code in this repo — every time, not just when asked to review —
+> (re-)read the relevant section(s) of [`docs/conventions.md`](docs/conventions.md). It is binding.**
+> Check the diff against it before calling the change done. An existing file already breaking a rule
+> (e.g. an older migration's section-comment style) is not license to repeat that violation in new
+> code — follow the written rule and flag the existing debt separately instead.
 > Clean, readable, standard-following code is a hard requirement here, not a nicety. Clarity beats
 > cleverness. The highlights below are the summary; the doc is the full contract.
 

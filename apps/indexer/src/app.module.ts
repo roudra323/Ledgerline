@@ -4,7 +4,7 @@ import { TypeOrmModule } from "@nestjs/typeorm";
 
 import { HealthController } from "./api/health.controller";
 import { ConfigModule } from "./config/config.module";
-import { dataSourceOptions } from "./data-source";
+import { appDataSourceOptions } from "./data-source";
 import { LedgerModule } from "./ledger/ledger.module";
 
 /**
@@ -32,7 +32,7 @@ import { LedgerModule } from "./ledger/ledger.module";
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forRoot(dataSourceOptions),
+    TypeOrmModule.forRoot(appDataSourceOptions),
     ScheduleModule.forRoot(),
     LedgerModule,
   ],
