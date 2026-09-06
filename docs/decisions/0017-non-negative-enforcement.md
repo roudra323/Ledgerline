@@ -123,6 +123,10 @@ lock order, which is the textbook remedy for lock-order deadlocks. `sequence` is
 so what it records is unchanged — only the INSERT order moves, and with it the order the per-row
 trigger takes its locks.
 
+Measured after the change, same crossed shape: **0 of 40 deadlocked through `post()`**, while the
+identical test driven by raw SQL still shows **33 of 40 (82.5%)**. That contrast is the evidence —
+it is the ordering that removes the deadlock, not a timing accident.
+
 That covers everything going through `post()`, which is the designated single writer. It does **not**
 cover a direct SQL writer choosing its own order — a migration, a `psql` session, a future second
 code path. Those keep the residual risk, and get an abort rather than a wrong balance, which is the

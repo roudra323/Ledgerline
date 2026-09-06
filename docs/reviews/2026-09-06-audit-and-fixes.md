@@ -177,6 +177,12 @@ The last one is no longer deferred. `post()` now inserts a transaction's entries
 remedy for lock-order deadlocks. `sequence` is an explicit column, so what it records is unchanged.
 Direct SQL writers keep the residual risk and get an abort rather than a wrong balance.
 
+The ordering change was then handed back for independent testing rather than tested by its author:
+**0 of 40 crossed postings deadlock through `post()`**, against **33 of 40 (82.5%)** for the same
+shape driven by raw SQL. That pass also caught a comparator returning `1` for equal account ids —
+never `0` — violating `Array.prototype.sort`'s antisymmetry contract and leaving the ordering only
+accidentally deterministic. Fixed by breaking ties on caller `sequence`.
+
 Three of the agent's tests _documented_ defects rather than asserting fixed behaviour, in the same
 style as its earlier `BigInt("   ")` finding. Each was flipped to assert the fix, keeping the
 original defect in the comment so the test explains why it exists.

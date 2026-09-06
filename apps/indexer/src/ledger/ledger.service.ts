@@ -182,7 +182,15 @@ export class LedgerService {
     // aborting under crossed 20-vs-20 concurrency. Ordering by account id gives every posting made
     // through this service one global lock order, which is the textbook fix. `sequence` is an
     // explicit column, so what it records is unchanged. See ADR-0017.
-    const orderedByAccount = [...rows].sort((a, b) => (a.accountId < b.accountId ? -1 : 1));
+    const orderedByAccount = [...rows].sort((a, b) => {
+      // Ties broken by caller order so the comparator is a proper total order: returning a non-zero
+      // value for equal ids violates antisymmetry, which makes the sort's behaviour engine-defined
+      // rather than deterministic. Two legs on one account need no particular order between them —
+      // the transaction already holds that lock — but a ledger this size should not ship a
+      // comparator that is only accidentally correct.
+      if (a.accountId === b.accountId) return a.sequence - b.sequence;
+      return a.accountId < b.accountId ? -1 : 1;
+    });
 
     for (const row of orderedByAccount) {
       await queryRunner.query(
