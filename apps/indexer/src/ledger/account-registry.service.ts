@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { EntityManager, Repository } from "typeorm";
 
 import type { AssetCode } from "@ledgerline/shared";
 
@@ -63,8 +63,23 @@ export class AccountRegistryService {
     private readonly accounts: Repository<LedgerAccount>,
   ) {}
 
-  async resolvePlatformAccount(code: string, assetCode: AssetCode): Promise<string> {
-    const account = await this.accounts.findOne({
+  /**
+   * Every method takes an optional `manager` so the caller can keep this work on **its own**
+   * connection. `LedgerService.post()` passes its `QueryRunner`'s manager: without it, creating a
+   * merchant account would run on a different connection and commit independently, so a posting
+   * that rolls back would still leave the account behind. Defaults to the injected repository's
+   * manager for callers with no transaction of their own.
+   */
+  private repository(manager?: EntityManager): Repository<LedgerAccount> {
+    return manager ? manager.getRepository(LedgerAccount) : this.accounts;
+  }
+
+  async resolvePlatformAccount(
+    code: string,
+    assetCode: AssetCode,
+    manager?: EntityManager,
+  ): Promise<string> {
+    const account = await this.repository(manager).findOne({
       where: { code, assetCode, ownerType: "platform" },
     });
     if (!account) {
@@ -77,15 +92,16 @@ export class AccountRegistryService {
     code: string,
     assetCode: AssetCode,
     merchantId: string,
+    manager?: EntityManager,
   ): Promise<string> {
-    const existing = await this.accounts.findOne({
+    const existing = await this.repository(manager).findOne({
       where: { code, assetCode, ownerType: "merchant", ownerId: merchantId },
     });
     if (existing) {
       return existing.id;
     }
 
-    return this.createMerchantAccount(code, assetCode, merchantId);
+    return this.createMerchantAccount(code, assetCode, merchantId, manager);
   }
 
   /**
@@ -100,6 +116,7 @@ export class AccountRegistryService {
     code: string,
     assetCode: AssetCode,
     merchantId: string,
+    manager?: EntityManager,
   ): Promise<string> {
     const definition = MERCHANT_ACCOUNT_DEFINITIONS[code];
     if (!definition) {
@@ -111,7 +128,8 @@ export class AccountRegistryService {
       );
     }
 
-    const inserted = await this.accounts.query<{ id: string }[]>(
+    const accounts = this.repository(manager);
+    const inserted = await accounts.query<{ id: string }[]>(
       `INSERT INTO ledger_accounts
          (code, name, account_type, normal_side, asset_code, owner_type, owner_id, allows_negative, is_active)
        VALUES ($1, $2, $3, $4, $5, 'merchant', $6, false, true)
@@ -125,7 +143,7 @@ export class AccountRegistryService {
       return insertedRow.id;
     }
 
-    const winner = await this.accounts.findOne({
+    const winner = await accounts.findOne({
       where: { code, assetCode, ownerType: "merchant", ownerId: merchantId },
     });
     if (!winner) {

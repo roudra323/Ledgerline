@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
-import { DataSource, type QueryRunner } from "typeorm";
+import { DataSource, type EntityManager, type QueryRunner } from "typeorm";
 
 import { MetricsService } from "../observability/metrics.service";
 
@@ -150,7 +150,9 @@ export class LedgerService {
   ): Promise<void> {
     let sequence = 0;
     for (const leg of legs) {
-      const accountId = await this.resolveAccountId(leg);
+      // The runner's manager, not the registry's own connection: resolving a leg can CREATE a
+      // merchant account, and that creation must live or die with this posting.
+      const accountId = await this.resolveAccountId(leg, queryRunner.manager);
       await queryRunner.query(
         `INSERT INTO ledger_entries (transaction_id, account_id, direction, asset_code, amount_minor, sequence)
          VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -164,10 +166,15 @@ export class LedgerService {
     // the account row itself) — this only affects the read-side projection.
   }
 
-  private resolveAccountId(leg: PostingLeg): Promise<string> {
+  private resolveAccountId(leg: PostingLeg, manager: EntityManager): Promise<string> {
     if (leg.merchantId) {
-      return this.accounts.resolveMerchantAccount(leg.accountCode, leg.assetCode, leg.merchantId);
+      return this.accounts.resolveMerchantAccount(
+        leg.accountCode,
+        leg.assetCode,
+        leg.merchantId,
+        manager,
+      );
     }
-    return this.accounts.resolvePlatformAccount(leg.accountCode, leg.assetCode);
+    return this.accounts.resolvePlatformAccount(leg.accountCode, leg.assetCode, manager);
   }
 }
