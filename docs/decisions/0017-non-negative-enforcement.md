@@ -17,7 +17,7 @@ SELECT SUM(...) INTO account_balance FROM ledger_entries WHERE account_id = NEW.
 ```
 
 The trigger is `DEFERRABLE INITIALLY DEFERRED`, so it runs at COMMIT — but under `READ COMMITTED`
-each statement takes a fresh snapshot that still excludes *uncommitted* rows. Two transactions that
+each statement takes a fresh snapshot that still excludes _uncommitted_ rows. Two transactions that
 reach their commit-time trigger concurrently therefore each read a balance excluding the other's
 entries. Both pass. The account goes negative.
 
@@ -36,11 +36,35 @@ already reads:
 ```sql
 SELECT normal_side, allows_negative INTO ...
   FROM ledger_accounts WHERE id = NEW.account_id
-  FOR UPDATE;
+  FOR NO KEY UPDATE;
 ```
 
 Concurrent commits touching the same account now queue behind each other, so the second one's balance
-read includes the first one's committed entries. The same migration also filters the balance sum by
+read includes the first one's committed entries.
+
+### The lock mode is `FOR NO KEY UPDATE`, and that detail is load-bearing
+
+The composite foreign key added in the same migration makes every `ledger_entries` INSERT take a
+**`KEY SHARE`** lock on its account row, held until that transaction commits. `FOR UPDATE` conflicts
+with `KEY SHARE`. So with `FOR UPDATE`, N concurrent postings against one account each hold a lock
+every other one needs, at the moment every one of them is trying to acquire it — a lock upgrade that
+deadlocks by construction. `FOR NO KEY UPDATE` is exclusive against itself, which is all the
+serialisation this check requires, and compatible with `KEY SHARE`.
+
+Neither change is wrong alone. Together, the wrong lock mode is catastrophic. Measured on
+PostgreSQL 17, 50 concurrent postings released through a simultaneous COMMIT barrier against an
+account with float for 10:
+
+| Lock mode                     | Elapsed   | Succeeded | Final balance     |
+| ----------------------------- | --------- | --------- | ----------------- |
+| none (the bug)                | 14 ms     | **13**    | **−3 — negative** |
+| `FOR UPDATE`                  | 54,834 ms | **1**     | 9 — 49 deadlocks  |
+| `FOR NO KEY UPDATE` (adopted) | 14 ms     | **10**    | 0                 |
+
+The first row is the write-skew this ADR exists to close, reproduced. It needs a commit barrier and
+more than ~20 concurrent writers to surface on one machine — the window between the trigger's `SELECT`
+and its transaction's commit record is small, which is exactly why it would have reached production
+as an occasional, unexplainable negative balance rather than a failing test. The same migration also filters the balance sum by
 `asset_code` and adds the composite foreign key
 `ledger_entries (account_id, asset_code) → ledger_accounts (id, asset_code)`, so the "accounts are
 per-asset" assumption the sum relied on is now enforced rather than assumed.
@@ -59,17 +83,17 @@ every insert. A `TODO(Block 1.7)` marks the spot.
 
 ## Alternatives considered
 
-| Alternative                                                       | Why it lost                                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Move the check into `LedgerService.post()`, inside Block 1.7's lock | Faster, and the lock would be explicit in application code. But it makes the invariant a *convention*: a migration, a psql session, or Part 4's reorg reversal writing entries directly would bypass it entirely. Golden rule 3 says the database enforces this, and the whole point of a ledger is that a second writer cannot lie. |
-| Run the posting transaction at `SERIALIZABLE`                     | Correct, and it would catch this class of bug generically. But it pushes serialisation failures onto every caller, requires a retry loop at each of them, and imposes the cost on transactions that touch no constrained account. A targeted row lock is the smaller hammer.                                                          |
-| `SELECT ... FOR UPDATE` on the `ledger_entries` rows instead       | You cannot lock rows that do not exist yet, which is the entire problem — the conflicting transaction's entries are the ones you need to see. Locking a single, always-present parent row is the standard answer.                                                                                                                    |
-| Do Block 1.7 now and fix it properly in one step                  | The right end state, but it merges a new feature block into a fix pass, against this project's own one-block-per-session rule, and would leave the fix record unreadable. The lock closes the correctness hole today; 1.7 removes the scan.                                                                                          |
-| Accept it — concurrency is unlikely in a demo                     | The exit criterion for Part 1 is a concurrency test. Building the system whose thesis is "the database makes this impossible" and then hoping is the exact failure this project exists to avoid.                                                                                                                                    |
+| Alternative                                                         | Why it lost                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Move the check into `LedgerService.post()`, inside Block 1.7's lock | Faster, and the lock would be explicit in application code. But it makes the invariant a _convention_: a migration, a psql session, or Part 4's reorg reversal writing entries directly would bypass it entirely. Golden rule 3 says the database enforces this, and the whole point of a ledger is that a second writer cannot lie. |
+| Run the posting transaction at `SERIALIZABLE`                       | Correct, and it would catch this class of bug generically. But it pushes serialisation failures onto every caller, requires a retry loop at each of them, and imposes the cost on transactions that touch no constrained account. A targeted row lock is the smaller hammer.                                                         |
+| `SELECT ... FOR UPDATE` on the `ledger_entries` rows instead        | You cannot lock rows that do not exist yet, which is the entire problem — the conflicting transaction's entries are the ones you need to see. Locking a single, always-present parent row is the standard answer.                                                                                                                    |
+| Do Block 1.7 now and fix it properly in one step                    | The right end state, but it merges a new feature block into a fix pass, against this project's own one-block-per-session rule, and would leave the fix record unreadable. The lock closes the correctness hole today; 1.7 removes the scan.                                                                                          |
+| Accept it — concurrency is unlikely in a demo                       | The exit criterion for Part 1 is a concurrency test. Building the system whose thesis is "the database makes this impossible" and then hoping is the exact failure this project exists to avoid.                                                                                                                                     |
 
 ## Consequences
 
-**Good.** The non-negative guarantee now holds under concurrent commits, and it holds for *any*
+**Good.** The non-negative guarantee now holds under concurrent commits, and it holds for _any_
 writer, not just `LedgerService.post()`.
 
 **Good.** The composite foreign key closes a second, independent hole: an entry can no longer name one
@@ -77,10 +101,17 @@ asset while pointing at an account configured for another, which would have made
 `SUM(amount_minor)` produce a plausible-looking, wrong number.
 
 **Bad — and deliberate.** Locking inside a deferred trigger means two transactions touching the same
-pair of accounts in opposite orders can **deadlock**. Postgres detects it and aborts one, which is a
+pair of accounts **in opposite orders** can still deadlock, because the trigger fires once per entry
+in insertion order and that order is the caller's. Postgres detects it and aborts one, which is a
 rollback — never a wrong balance. It fails closed, which is the correct direction for money, but it is
-a new way for a posting to fail and callers must be prepared to retry. Documented here rather than
-discovered at 3am.
+a new way for a posting to fail and callers must be prepared to retry.
+
+This is now a genuinely rare event rather than the norm (see the lock-mode table above), but the
+structural fix is to give `LedgerService.post()` a **deterministic lock order** — insert a
+transaction's entries ordered by `account_id`, so every posting acquires account locks in the same
+sequence. `sequence` is an explicit column, so ordering the INSERTs does not change what it records.
+Deferred to Block 1.7, which rewrites this trigger anyway; noted here so it is a decision rather than
+an omission.
 
 **Bad.** `SECURITY DEFINER` means this function runs with the table owner's privileges. That is the
 narrowest way to get the lock, but it is a privilege boundary and it must stay tiny and auditable —

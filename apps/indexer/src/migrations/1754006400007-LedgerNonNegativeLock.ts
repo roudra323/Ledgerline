@@ -81,13 +81,21 @@ const lockingBalanceFunction = `
         NEW.transaction_id, bad.asset_code, bad.residual;
     END IF;
 
-    -- FOR UPDATE is the whole point: it serialises concurrent commits touching this account, so the
+    -- The lock is the whole point: it serialises concurrent commits touching this account, so the
     -- balance read below cannot miss another transaction's uncommitted entries.
+    --
+    -- FOR NO KEY UPDATE, not FOR UPDATE. The composite foreign key added above makes every
+    -- ledger_entries INSERT take a KEY SHARE lock on its account row, held until that transaction
+    -- commits. FOR UPDATE conflicts with KEY SHARE, so N concurrent postings against one account
+    -- each hold a lock the others must have and every one of them deadlocks — measured at N=50,
+    -- 49 aborted and the batch took 55 seconds. FOR NO KEY UPDATE is exclusive against itself
+    -- (which is all the serialisation this check needs) but compatible with KEY SHARE: the same
+    -- batch then takes 14ms and admits exactly the 10 the float covers. See ADR-0017.
     SELECT normal_side, allows_negative
       INTO account_normal_side, account_allows_negative
       FROM ledger_accounts
      WHERE id = NEW.account_id
-       FOR UPDATE;
+       FOR NO KEY UPDATE;
 
     -- TODO(Block 1.7): read the locked ledger_account_balances row instead of re-deriving from
     -- history. The projection row is the natural lock target, and this scan is O(entries per

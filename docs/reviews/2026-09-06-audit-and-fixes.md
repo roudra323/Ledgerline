@@ -68,10 +68,32 @@ concurrent commits touching one account queue. See
 [ADR-0017](../decisions/0017-non-negative-enforcement.md), including why a deadlock here is the
 correct failure.
 
-**A consequence only running the tests revealed:** `SELECT ... FOR UPDATE` requires `UPDATE`
-privilege, and `ledgerline_app` deliberately has only `SELECT` and `INSERT` on `ledger_accounts`. Every
-posting failed at COMMIT with `permission denied`. The function is now `SECURITY DEFINER` with a
-pinned `search_path` — a privilege boundary that must stay tiny and auditable.
+**Two consequences only running things revealed**, neither findable by reading:
+
+_Privileges._ `SELECT ... FOR UPDATE` requires `UPDATE` privilege, and `ledgerline_app` deliberately
+has only `SELECT` and `INSERT` on `ledger_accounts`. Every posting failed at COMMIT with
+`permission denied`. The function is now `SECURITY DEFINER` with a pinned `search_path` — a privilege
+boundary that must stay tiny and auditable.
+
+_Lock mode._ The first version used `FOR UPDATE`, which **deadlocks by construction** against the
+composite foreign key added in §1.3: the FK makes every `ledger_entries` INSERT take a `KEY SHARE`
+lock on its account row until commit, and `FOR UPDATE` conflicts with `KEY SHARE`, so every concurrent
+posting holds a lock all the others need. Neither change is wrong alone; together the wrong lock mode
+is catastrophic. `FOR NO KEY UPDATE` is exclusive against itself — all the serialisation this check
+needs — and compatible with `KEY SHARE`. Measured on PostgreSQL 17, 50 concurrent postings released
+through a simultaneous COMMIT barrier against float for 10:
+
+| Lock mode                     | Elapsed   | Succeeded | Final balance     |
+| ----------------------------- | --------- | --------- | ----------------- |
+| none (the bug)                | 14 ms     | **13**    | **−3 — negative** |
+| `FOR UPDATE`                  | 54,834 ms | **1**     | 9 — 49 deadlocks  |
+| `FOR NO KEY UPDATE` (adopted) | 14 ms     | **10**    | 0                 |
+
+The first row is the original write-skew, reproduced. It takes a commit barrier and more than ~20
+concurrent writers to surface on one machine, which is why an ordinary 20-way concurrency test passes
+with **and without** the lock — and why this would have reached production as an occasional,
+unexplainable negative balance rather than a failing test. The committed regression test uses the
+barrier for that reason.
 
 ### 1.3 An entry's asset was not tied to its account's asset
 
