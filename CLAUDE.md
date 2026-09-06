@@ -81,6 +81,14 @@ wrote an implementation is the worst possible judge of it, because it tests the 
 thinking about. Both run with no access to the implementer's reasoning — only the code on disk and
 the project's own binding documents.
 
+**The unit of that rule is the changed file, not the session.** "I invoked `adversarial-tester`" is
+not the standard; "every file I changed was tested by someone who did not change it" is. The
+2026-09-06 audit met the first and failed the second — two of fourteen changed files went to the
+agent, the author tested two more himself, and three had no tests at all. Handing over the remainder
+afterwards found four more real defects, three of them in the audit's own fixes. Writing the test
+yourself is most tempting exactly when the code looks obviously correct, which is when it is least
+likely to be.
+
 - Build **block by block** (Blocks `N.M` within Parts 0–13 — see
   [`docs/implementation-guide.md`](docs/implementation-guide.md) for the order,
   [`docs/build-plan.md`](docs/build-plan.md) for the exit criteria). One block per session. Each
@@ -165,20 +173,20 @@ docs                architecture · failure-modes · decisions/ · conventions �
 **Every line names how it is checked.** A checkbox you can tick from memory gets ticked; a checkbox
 with a command next to it gets run. Run the command.
 
-| ✔   | Done means                                             | Checked by                                                                                                                                      |
-| --- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| ☐   | Behavior implemented and covered by a test             | `pnpm test` and `pnpm test:integration` — both green, output pasted                                                                             |
-| ☐   | The block's `Verify` step actually run                 | paste its **real output** into the commit body; "assumed" is not "verified"                                                                     |
-| ☐   | Independent tests written for money-moving code        | `adversarial-tester` ran; never the agent that wrote the implementation                                                                         |
-| ☐   | Independent review of the final diff                   | `ledger-reviewer` ran; every finding resolved or recorded — **required** for `ledger/`, `sagas/`, `chain-writer/`, `compliance/`, `migrations/` |
-| ☐   | New failure modes documented **with their test**       | `rg "<the new rejection path>" docs/failure-modes.md` finds it                                                                                  |
-| ☐   | Metrics/spans on any new path, labels permitted        | `rg 'metrics\.' <changed files>` is non-empty, or the commit body says why not                                                                  |
-| ☐   | Money is integer minor units, one asset per expression | `rg ': number' <changed files>` has no money-typed hit                                                                                          |
-| ☐   | Significant design choice has an ADR                   | a new file in `docs/decisions/` with alternatives and why each lost                                                                             |
-| ☐   | Docs and schema still agree                            | `pnpm docs:check`                                                                                                                               |
-| ☐   | Lint, types, formatting clean                          | `pnpm lint && pnpm typecheck && pnpm format:check`                                                                                              |
-| ☐   | `docs/progress.md` updated **in this same commit**     | `git diff --cached --name-only \| rg docs/progress.md`                                                                                          |
-| ☐   | Conventional commit message                            | commitlint (husky `commit-msg`)                                                                                                                 |
+| ✔   | Done means                                             | Checked by                                                                                                                                                                                |
+| --- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ☐   | Behavior implemented and covered by a test             | `pnpm test` and `pnpm test:integration` — both green, output pasted                                                                                                                       |
+| ☐   | The block's `Verify` step actually run                 | paste its **real output** into the commit body; "assumed" is not "verified"                                                                                                               |
+| ☐   | Independent tests, **per changed file**                | list the files with non-comment changes (`git diff --name-only main...HEAD`); each has a test written by someone who did not write it, or the commit body names the file and says why not |
+| ☐   | Independent review of the final diff                   | `ledger-reviewer` ran; every finding resolved or recorded — **required** for `ledger/`, `sagas/`, `chain-writer/`, `compliance/`, `migrations/`                                           |
+| ☐   | New failure modes documented **with their test**       | `rg "<the new rejection path>" docs/failure-modes.md` finds it                                                                                                                            |
+| ☐   | Metrics/spans on any new path, labels permitted        | `rg 'metrics\.' <changed files>` is non-empty, or the commit body says why not                                                                                                            |
+| ☐   | Money is integer minor units, one asset per expression | `rg ': number' <changed files>` has no money-typed hit                                                                                                                                    |
+| ☐   | Significant design choice has an ADR                   | a new file in `docs/decisions/` with alternatives and why each lost                                                                                                                       |
+| ☐   | Docs and schema still agree                            | `pnpm docs:check`                                                                                                                                                                         |
+| ☐   | Lint, types, formatting clean                          | `pnpm lint && pnpm typecheck && pnpm format:check`                                                                                                                                        |
+| ☐   | `docs/progress.md` updated **in this same commit**     | `git diff --cached --name-only \| rg docs/progress.md`                                                                                                                                    |
+| ☐   | Conventional commit message                            | commitlint (husky `commit-msg`)                                                                                                                                                           |
 
 On the tracker: flip the block to ✅, fill in date and commit, update the progress bar and "Next
 action", add a Log entry if a design decision changed. **Only add information** — never overwrite an

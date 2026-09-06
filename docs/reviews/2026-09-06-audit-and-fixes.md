@@ -158,6 +158,33 @@ deep-equal. **Fixed** — `postedAt` is threaded through `PostingRequest`.
 
 ---
 
+## 3a. A second testing pass, and what it says about the first
+
+The first pass satisfied the definition-of-done line "`adversarial-tester` ran" while failing what
+that line was for. Of **fourteen files with non-comment changes**, two went to the agent, the author
+wrote tests for two more himself, and three had none at all. Handing over the remainder found four
+further defects — **three of them in this audit's own fixes**:
+
+| Defect                                                                                                                                                                                                                                                                                                                                                                                                                     | Where                                             |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `post()`'s atomicity was conditional. Given a `QueryRunner` that was `connect()`-ed but never `startTransaction()`-ed, every statement autocommitted: the header committed, the first leg was then a one-legged unbalanced transaction and was rejected, leaving an orphaned `ledger_transactions` row with zero entries — which the immutability trigger makes permanent. Now refuses a runner with no active transaction | `ledger.service.ts`                               |
+| `docs-check.mjs` scanned only double-quoted `kind: "..."`, so a single-quoted sample posting an invalid kind passed silently — a vacuous pass in the check whose whole job is catching that. Widening the quote class alone makes every TypeScript union example in the docs a false positive, so the discriminator is now whether the fenced block is actually a posting                                                  | `scripts/docs-check.mjs`                          |
+| `docs-check.mjs` chose "the" kind-defining migration with a bare `/kind IN (/`, so any later migration adding an unrelated `CHECK` on another table's `kind` column would hijack the check and fail against the correct migration. Now anchored on `ledger_transactions`                                                                                                                                                   | `scripts/docs-check.mjs`                          |
+| ADR-0017 called the residual cross-account deadlock "rare". Measured: **87.5%** — 35 of 40 crossed postings released together. Correctness held (every abort a clean rollback, balances summing to zero) but availability collapsed                                                                                                                                                                                        | `docs/decisions/0017-non-negative-enforcement.md` |
+
+The last one is no longer deferred. `post()` now inserts a transaction's entries **ordered by
+`account_id`**, giving every posting through the single writer one global lock order — the textbook
+remedy for lock-order deadlocks. `sequence` is an explicit column, so what it records is unchanged.
+Direct SQL writers keep the residual risk and get an abort rather than a wrong balance.
+
+Three of the agent's tests _documented_ defects rather than asserting fixed behaviour, in the same
+style as its earlier `BigInt("   ")` finding. Each was flipped to assert the fix, keeping the
+original defect in the comment so the test explains why it exists.
+
+**The rule this changed.** `CLAUDE.md`'s definition of done now makes the unit of independent
+testing the **changed file**, not the session: "I invoked `adversarial-tester`" is not the standard,
+"every file I changed was tested by someone who did not change it" is.
+
 ## 4. Instructions
 
 - `CLAUDE.md` gained **Where facts live** — one owning file per fact; non-owners link rather than
