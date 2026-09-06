@@ -19,19 +19,27 @@ export class LedgerService {
     private readonly accounts: AccountRegistryService,
   ) {}
 
-  async post(request: PostingRequest): Promise<PostingResult> {
+  /**
+   * Posts one balanced transaction, or recognises that its cause was already posted.
+   *
+   * Pass `joinTransaction` to post inside a transaction the caller already owns — a saga's state
+   * change and its ledger posting must commit together, or a crash between them leaves a transition
+   * with no posting. When it is passed, this method neither commits nor rolls back: the caller's
+   * COMMIT is where the deferred balance trigger fires.
+   */
+  async post(request: PostingRequest, joinTransaction?: QueryRunner): Promise<PostingResult> {
     this.assertPostable(request.entries);
+
+    if (joinTransaction) {
+      return this.write(joinTransaction, request);
+    }
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      const result = await this.insertTransactionHeader(queryRunner, request);
-      if (!result.alreadyPosted) {
-        await this.insertEntries(queryRunner, result.transactionId, request.entries);
-      }
-
+      const result = await this.write(queryRunner, request);
       await queryRunner.commitTransaction();
       return result;
     } catch (error) {
@@ -42,6 +50,15 @@ export class LedgerService {
     } finally {
       await queryRunner.release();
     }
+  }
+
+  /** The write itself, with no opinion about who owns the surrounding transaction. */
+  private async write(queryRunner: QueryRunner, request: PostingRequest): Promise<PostingResult> {
+    const result = await this.insertTransactionHeader(queryRunner, request);
+    if (!result.alreadyPosted) {
+      await this.insertEntries(queryRunner, result.transactionId, request.entries);
+    }
+    return result;
   }
 
   /**
@@ -59,7 +76,9 @@ export class LedgerService {
     for (const leg of legs) {
       const amount = BigInt(leg.amountMinor);
       if (amount <= 0n) {
-        throw new Error(`Leg ${index} (${leg.accountCode}): amountMinor must be positive, got ${leg.amountMinor}`);
+        throw new Error(
+          `Leg ${index} (${leg.accountCode}): amountMinor must be positive, got ${leg.amountMinor}`,
+        );
       }
 
       const signed = leg.direction === "debit" ? amount : -amount;
@@ -77,14 +96,29 @@ export class LedgerService {
   /**
    * Inserts the transaction header with `ON CONFLICT (kind, cause_type, cause_id) DO NOTHING`.
    * A conflict means this cause was already posted — expected on webhook redelivery, not an error.
+   *
+   * The re-select afterwards depends on `READ COMMITTED`, the connection default: a concurrent
+   * inserter's uncommitted row makes our INSERT block until it commits, and the fresh snapshot the
+   * SELECT then takes sees it. Under `REPEATABLE READ` the SELECT would use the transaction's older
+   * snapshot, find nothing, and raise the error below — so do not raise the isolation level here
+   * without replacing this with `ON CONFLICT ... DO UPDATE ... RETURNING`.
    */
-  private async insertTransactionHeader(queryRunner: QueryRunner, request: PostingRequest): Promise<PostingResult> {
+  private async insertTransactionHeader(
+    queryRunner: QueryRunner,
+    request: PostingRequest,
+  ): Promise<PostingResult> {
     const inserted = (await queryRunner.query(
-      `INSERT INTO ledger_transactions (kind, cause_type, cause_id, metadata)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO ledger_transactions (kind, cause_type, cause_id, posted_at, metadata)
+       VALUES ($1, $2, $3, COALESCE($4, now()), $5)
        ON CONFLICT (kind, cause_type, cause_id) DO NOTHING
        RETURNING id`,
-      [request.kind, request.cause.type, request.cause.id, request.memo ? { memo: request.memo } : null],
+      [
+        request.kind,
+        request.cause.type,
+        request.cause.id,
+        request.postedAt ?? null,
+        request.memo ? { memo: request.memo } : null,
+      ],
     )) as { id: string }[];
 
     const insertedRow = inserted[0];
@@ -121,9 +155,9 @@ export class LedgerService {
       sequence += 1;
     }
 
-    // TODO(Block 1.7): update ledger_account_balances here once Block 1.7's row-locked balance
-    // repository exists. The deferred trigger already guarantees correctness without it —
-    // this only affects the read-side projection, not the ledger's integrity.
+    // TODO(Block 1.7): update ledger_account_balances here once the row-locked balance repository
+    // exists. The deferred trigger already guarantees correctness without it (1754006400007 locks
+    // the account row itself) — this only affects the read-side projection.
   }
 
   private resolveAccountId(leg: PostingLeg): Promise<string> {

@@ -31,6 +31,12 @@ export interface PostingRequest {
   readonly kind: TransactionKind;
   readonly cause: LedgerCause;
   readonly memo?: string;
+  /**
+   * Business time of the event, not wall-clock insert time. Omit on the live path and the database
+   * default (`now()`) applies; a replay MUST supply the original time, or rebuilt history is stamped
+   * with the replay's clock and Part 4's replay-determinism deep-equal fails.
+   */
+  readonly postedAt?: Date;
   readonly entries: readonly PostingLeg[];
 }
 
