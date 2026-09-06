@@ -8,8 +8,8 @@ import { appDataSourceOptions } from "../src/data-source";
 import { AccountRegistryService } from "../src/ledger/account-registry.service";
 import { LedgerAccount } from "../src/ledger/entities/ledger-account.entity";
 import { LedgerService } from "../src/ledger/ledger.service";
-import { MetricsService } from "../src/observability/metrics.service";
 import type { PostingRequest } from "../src/ledger/ledger.types";
+import { MetricsService } from "../src/observability/metrics.service";
 
 /**
  * Proves LedgerService.post() (Block 1.6) end to end: it posts a balanced transaction, it is

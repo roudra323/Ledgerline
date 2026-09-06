@@ -43,7 +43,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: foundry-rs/foundry-toolchain@v1
       # Foundry deps live in lib/ (git-ignored) and are installed here, not committed.
-      # Pin versions once they're chosen in Phase 0 (e.g. --no-commit @<tag>).
+      # TODO(Block 2.0): pin both to a tag. Unpinned installs make the contracts build
+      # non-reproducible, which is indefensible in a project whose thesis is determinism. Left
+      # unpinned only because Block 2.0 is where the versions actually get chosen - pinning to a
+      # guessed tag now would be worse than the honest TODO.
       - name: Install contract dependencies
         working-directory: packages/contracts
         run: |
@@ -55,7 +58,7 @@ jobs:
       - name: forge test
         working-directory: packages/contracts
         run: forge test -vvv
-      # TODO(Phase 7): add `forge test --match-test invariant` and optional slither job.
+      # TODO(Block 2.6): add `forge test --match-test invariant` and an optional slither job.
 
   unit:
     name: Unit tests
@@ -71,16 +74,49 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
-      # TODO(Phase 7): idempotency + replay-golden tests.
+      # TODO(Block 4.5): replay-golden tests, once the replay service exists.
 
   integration:
-    name: Integration (Anvil + Postgres)
+    name: Integration (Postgres)
     runs-on: ubuntu-latest
-    # TODO(Phase 7): spin up testcontainers/compose (Anvil + Postgres),
-    # fire real txs, assert projections, kill/restart mid-stream, simulate reorg.
+    # Every load-bearing ledger guarantee - the deferred balance trigger, the immutability
+    # trigger, `permission denied` under ledgerline_app, the non-negative check, post()'s
+    # idempotency - is proven only by these tests. Until 2026-09-06 this job was a stub, so they
+    # ran on one laptop and nowhere else. implementation-guide.md Block 1.8 says it plainly: a
+    # correctness test that isn't in CI is a test that will rot.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ledgerline
+          POSTGRES_PASSWORD: ledgerline
+          POSTGRES_DB: ledgerline
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # test/global-setup.ts creates and migrates a throwaway database per run from these, and
+      # drops it afterwards. The ledgerline role owns the cluster, so it can CREATE DATABASE;
+      # ledgerline_app is created by the immutability migration with this password.
+      DATABASE_URL: postgresql://ledgerline:ledgerline@localhost:5432/ledgerline
+      APP_DATABASE_URL: postgresql://ledgerline_app:ledgerline_app@localhost:5432/ledgerline
     steps:
       - uses: actions/checkout@v4
-      - run: echo "Integration tests are wired up in Phase 7."
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:integration
+      # TODO(Part 4): add Anvil, fire real txs, assert projections, kill/restart mid-stream,
+      # simulate a reorg. Needs the contracts (Part 2) and the chain writer (Part 3) first.
 
   docker-build:
     name: Docker build
