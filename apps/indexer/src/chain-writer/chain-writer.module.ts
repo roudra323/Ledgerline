@@ -6,7 +6,7 @@
  * Recovery after a crash at any point is then uniformly "re-broadcast every attempt whose parent
  * isn't confirmed" — and `already known` / `nonce too low` are SUCCESS signals, not errors.
  *
- * TODO(Phase 3):
+ * TODO(Part 3):
  *   - entities: ChainAccount, ChainTransaction, ChainTxAttempt, ChainFingerprint.
  *   - SignerPort + LocalDevSigner (boot-crashes unless NODE_ENV !== 'production' && chainId 31337).
  *   - KmsSigner: DER -> (r,s), normalize s to low half-order per EIP-2, recover v. Unit-tested

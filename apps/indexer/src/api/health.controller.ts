@@ -10,7 +10,7 @@ import type { DataSource } from "typeorm";
  * with an explicit db flag beats a 503 that a load balancer might mistake for a
  * restart. The sagas park; the process does not exit.
  *
- * TODO(Phase 5): shape as { block, lagBlocks, lagSeconds, syncKeys: [...] } and move
+ * TODO(Part 4): shape as { block, lagBlocks, lagSeconds, syncKeys: [...] } and move
  * to /health/indexer once the indexer cursors exist.
  */
 @Controller("health")

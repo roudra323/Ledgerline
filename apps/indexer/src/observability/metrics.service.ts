@@ -4,7 +4,7 @@
  * Naming: `ledgerline_` prefix, standard units, LOW-cardinality labels only
  * (sync_key, event_name, provider, contract, route) — NEVER user addresses or tx hashes.
  *
- * TODO(Phase 3) register the full instrument set (see docs/observability.md):
+ * TODO(Part 7) register the full instrument set (see docs/observability.md):
  *   Indexer health:
  *     ledgerline_indexer_lag_blocks{sync_key}                gauge
  *     ledgerline_indexer_lag_seconds{sync_key}               gauge

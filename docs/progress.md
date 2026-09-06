@@ -3,11 +3,11 @@
 > **Update this file at the end of every block, in the same commit as the work.**
 > A tracker updated later is a tracker nobody trusts.
 
-**Overall: 15 / 76 blocks complete** — Phase 0 done, Part 1 in progress.
+**Overall: 16 / 76 blocks complete** — Phase 0 done, Part 1 in progress.
 
 ```
 Phase 0  ████████████████████  9/9    ✅ complete
-Part 1   █████████████░░░░░░░  6/9    ← YOU ARE HERE
+Part 1   ███████████████░░░░░  7/9    ← YOU ARE HERE
 Part 2   ░░░░░░░░░░░░░░░░░░░░  0/8
 Part 3   ░░░░░░░░░░░░░░░░░░░░  0/8
 Part 4   ░░░░░░░░░░░░░░░░░░░░  0/5
@@ -17,7 +17,7 @@ Part 7   ░░░░░░░░░░░░░░░░░░░░  0/5
 Parts 8–13                     0/20   (optional — see cut list)
 ```
 
-**Next action:** Block 1.6 — `LedgerService.post()` — the single writer
+**Next action:** Block 1.7 — Balances projection + row lock
 
 **Minimum shippable point:** end of **Part 7**. Every thing after that is depth.
 
@@ -63,17 +63,17 @@ Complete. The pivot from staking to a payment rail.
 
 _The foundation. Nothing works if this is wrong._
 
-| Block | What                                              | Status | Date       | Commit  | Notes                                                                                                                                                                                                                       |
-| ----- | ------------------------------------------------- | ------ | ---------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1.0   | App boots, connects to Postgres                   | ✅     | 2026-08-03 | 2a42ce9 | zod env fails loud at boot; `/health` does a real `SELECT 1`; `incremental:false` fixed a silent stale `dist/`                                                                                                              |
-| 1.1   | `money.ts` — integer money, `splitFee`, `convert` | ✅     | 2026-08-04 |         | integer minor unit math, fee derivation, fast-check property tests passing (1000/1000 runs)                                                                                                                                 |
-| 1.2   | Double-entry concept _(no code)_                  | ✅     | 2026-08-05 |         | Debits = Credits mental model, 4 account types                                                                                                                                                                              |
-| 1.3   | Ledger tables + entities                          | ✅     | 2026-08-05 |         | CreateLedgerTables migration + 5 TypeORM entities registered in LedgerModule                                                                                                                                                |
-| 1.4   | Deferred balance trigger                          | ✅     | 2026-08-20 |         | `CONSTRAINT TRIGGER ... DEFERRABLE INITIALLY DEFERRED`; integration test proves COMMIT throws on an unbalanced USD leg                                                                                                      |
-| 1.5   | Immutability trigger + `reverses_id`              | ✅     | 2026-08-30 |         | `BEFORE UPDATE OR DELETE` trigger on both log tables; least-privilege `ledgerline_app` role split out (owner bypasses REVOKE, so a second role was required for it to mean anything); transaction-level `reverses_id` added |
-| 1.6   | `LedgerService.post()` — the single writer        | ☐      |            |         |                                                                                                                                                                                                                             |
-| 1.7   | Balances projection + row lock                    | ☐      |            |         |                                                                                                                                                                                                                             |
-| 1.8   | Trial-balance property test                       | ☐      |            |         |                                                                                                                                                                                                                             |
+| Block | What                                              | Status | Date       | Commit  | Notes                                                                                                                                                                                                                                                           |
+| ----- | ------------------------------------------------- | ------ | ---------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.0   | App boots, connects to Postgres                   | ✅     | 2026-08-03 | 2a42ce9 | zod env fails loud at boot; `/health` does a real `SELECT 1`; `incremental:false` fixed a silent stale `dist/`                                                                                                                                                  |
+| 1.1   | `money.ts` — integer money, `splitFee`, `convert` | ✅     | 2026-08-04 |         | integer minor unit math, fee derivation, fast-check property tests passing (1000/1000 runs)                                                                                                                                                                     |
+| 1.2   | Double-entry concept _(no code)_                  | ✅     | 2026-08-05 |         | Debits = Credits mental model, 4 account types                                                                                                                                                                                                                  |
+| 1.3   | Ledger tables + entities                          | ✅     | 2026-08-05 |         | CreateLedgerTables migration + 5 TypeORM entities registered in LedgerModule                                                                                                                                                                                    |
+| 1.4   | Deferred balance trigger                          | ✅     | 2026-08-30 |         | `CONSTRAINT TRIGGER ... DEFERRABLE INITIALLY DEFERRED`; integration test proves COMMIT throws on an unbalanced USD leg. Extended 2026-08-30 (see Log) to also enforce non-negative per `allows_negative`, closing a gap against `docs/architecture.md`/ADR-0004 |
+| 1.5   | Immutability trigger + `reverses_id`              | ✅     | 2026-08-30 |         | `BEFORE UPDATE OR DELETE` trigger on both log tables; least-privilege `ledgerline_app` role split out (owner bypasses REVOKE, so a second role was required for it to mean anything); transaction-level `reverses_id` added                                     |
+| 1.6   | `LedgerService.post()` — the single writer        | ✅     | 2026-08-30 |         | `AccountRegistryService` resolves codes → UUIDs, creates per-merchant accounts on demand; `post()` validates in TS then commits via `ON CONFLICT DO NOTHING`; idempotency and unbalanced-rejection proven by integration test                                   |
+| 1.7   | Balances projection + row lock                    | ☐      |            |         |                                                                                                                                                                                                                                                                 |
+| 1.8   | Trial-balance property test                       | ☐      |            |         |                                                                                                                                                                                                                                                                 |
 
 **Part 1 exit:** 10k random postings → trial balance exactly 0 · `UPDATE ledger_entries` throws ·
 20 concurrent payouts against float for 10 → exactly 10 succeed.
@@ -220,16 +220,16 @@ Cut from the bottom if time runs short. See [`build-plan.md` §3.1](build-plan.m
 
 Re-run before every commit. Update the date when you do.
 
-| Check       | Command                    | Last green                                   |
-| ----------- | -------------------------- | -------------------------------------------- |
-| Lint        | `pnpm lint`                | 2026-08-30                                   |
-| Typecheck   | `pnpm typecheck`           | 2026-08-30                                   |
-| Format      | `pnpm format:check`        | 2026-08-03                                   |
-| Contracts   | `pnpm contracts-test`      | — _(no tests yet, Part 2)_                   |
-| Unit        | `pnpm test`                | — _(no tests yet, Block 1.1)_                |
-| Integration | `pnpm test:integration`    | 2026-08-30 — immutability trigger + app role |
-| Compose     | `docker compose config -q` | 2026-08-01                                   |
-| Alert rules | `promtool check rules`     | 2026-08-01 — 25 rules                        |
+| Check       | Command                    | Last green                                             |
+| ----------- | -------------------------- | ------------------------------------------------------ |
+| Lint        | `pnpm lint`                | 2026-08-30                                             |
+| Typecheck   | `pnpm typecheck`           | 2026-08-30                                             |
+| Format      | `pnpm format:check`        | 2026-08-03                                             |
+| Contracts   | `pnpm contracts:test`      | — _(no tests yet, Part 2)_                             |
+| Unit        | `pnpm test`                | 2026-08-30 — money.ts + LedgerService validation       |
+| Integration | `pnpm test:integration`    | 2026-08-30 — non-negative check + LedgerService.post() |
+| Compose     | `docker compose config -q` | 2026-08-01                                             |
+| Alert rules | `promtool check rules`     | 2026-08-01 — 25 rules                                  |
 
 ---
 
@@ -237,6 +237,27 @@ Re-run before every commit. Update the date when you do.
 
 Newest first. Record anything a future reader would need: decisions taken, things that surprised
 you, blocks cut and why, questions you couldn't answer.
+
+### 2026-08-30 — Block 1.4, a doc-alignment correction found while explaining Block 1.6
+
+`docs/architecture.md` §2.2 and ADR-0004 both describe the balance trigger as enforcing THREE
+things: immutability, balance, and non-negative (`allows_negative = false` accounts must never go
+below zero). `implementation-guide.md`'s Block 1.4 section only asked for the first two — the
+non-negative check was actually assigned to Block 1.8's property test, phrased as an `assert` rather
+than a DB-enforced rule. The gap surfaced answering a conceptual question about what `allows_negative`
+means; asked to strictly follow the design docs, closed it with a new migration
+(`1754006400004-LedgerNonNegativeCheck.ts`, `CREATE OR REPLACE FUNCTION` on the same trigger — the
+original 1.4 migration was left untouched, same "supersede, never edit" discipline as ADRs) that
+derives each touched account's running balance directly from `ledger_entries` (no
+`ledger_account_balances` yet) signed by its own `normal_side`, and rejects the commit if a
+non-`allows_negative` account would end up below zero. Proven by two new tests: one drives a fresh
+`allows_negative=false` test account negative and expects rejection, the other does the same to
+`fx_clearing` (`allows_negative=true`) and expects success.
+
+Building Block 1.6's `AccountRegistryService` surfaced a second, unrelated grant gap: the
+`ledgerline_app` role could `SELECT` but not `INSERT` into `ledger_accounts`, so creating a
+per-merchant account at runtime failed with `permission denied`. Closed with
+`1754006400005-GrantAppRoleAccountInsert.ts` — `INSERT` only, no `UPDATE`/`DELETE`.
 
 ### 2026-08-30 — Block 1.5, a scope correction
 

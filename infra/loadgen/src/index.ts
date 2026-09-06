@@ -1,7 +1,7 @@
 /**
  * Load generator — a first-class deliverable, not an afterthought. Empty dashboards prove nothing.
  *
- * TODO(Phase 7):
+ * TODO(Part 7):
  *   - drive the real API, not the chain directly: POST /payment-intents with unique
  *     Idempotency-Keys, at a configurable rate across N merchants and customers.
  *   - a weighted action mix: mostly on-ramp, some refunds (incl. partials), some payouts.

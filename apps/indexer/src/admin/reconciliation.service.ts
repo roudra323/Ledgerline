@@ -6,7 +6,7 @@
  * (kind='reconciliation.adjustment'), always with a memo and an operator id. A system that
  * silently self-heals a discrepancy has destroyed the evidence of the bug.
  *
- * TODO(Phase 7):
+ * TODO(Part 7):
  *   - ChainLedgerReconciler (30s): totalSupply() and balanceOf(treasury) via eth_call
  *     AT head - CONFIRMATIONS, NOT at head. Comparing a settled ledger against unsettled chain
  *     state makes drift oscillate. Compare against ledger balances as of the same block.

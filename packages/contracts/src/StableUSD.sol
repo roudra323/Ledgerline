@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 /// @title StableUSD (USDX) — a FiatToken-shaped issuer stablecoin.
 /// @notice Modelled on Circle's FiatToken: 6 decimals, minter allowances, blacklist, pause,
 ///         EIP-2612 permit and EIP-3009 authorized transfers.
-/// @dev    TODO(Phase 2): implement. Roles via OZ AccessControl:
+/// @dev    TODO(Part 2): implement. Roles via OZ AccessControl:
 ///           DEFAULT_ADMIN_ROLE, MASTER_MINTER_ROLE, MINTER_ROLE, PAUSER_ROLE, BLACKLISTER_ROLE
 ///
 ///         Interface (see docs/build-plan.md Part 1.1):
@@ -23,7 +23,7 @@ pragma solidity 0.8.28;
 ///         desynchronizes the saga. `receiveWithAuthorization` requires msg.sender == to, so only
 ///         PaymentProcessor can execute it.
 ///
-///         TODO(Phase 2) invariant suite (StableUSD.invariants.t.sol), bounded handler:
+///         TODO(Part 2) invariant suite (StableUSD.invariants.t.sol), bounded handler:
 ///           - sumOfTrackedBalances == totalSupply()
 ///           - totalSupply() == ghost_totalMinted - ghost_totalBurned
 ///           - ghost_mintedByMinter[m] <= ghost_allowanceGrantedTo[m]  (across a sequence)

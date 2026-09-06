@@ -6,7 +6,7 @@
  * then drop the third." Without that, every entry in the A-group of docs/failure-modes.md is a
  * claim rather than a tested behaviour.
  *
- * TODO(Phase 5) — payment API (mirrors the shape of a real PSP):
+ * TODO(Part 5) — payment API (mirrors the shape of a real PSP):
  *   POST /v1/payment_intents          honours an Idempotency-Key header
  *   POST /v1/payment_intents/:id/capture
  *   POST /v1/refunds
@@ -14,12 +14,12 @@
  *   GET  /v1/:object/:id              for the reconciliation poller (failure mode A5)
  *   GET  /v1/settlement_report        daily CSV, for the three-way match
  *
- * TODO(Phase 5) — webhooks:
+ * TODO(Part 5) — webhooks:
  *   HMAC-SHA256 over the RAW body, with a timestamp in the signature header, exactly as Stripe
  *   does. Delivery retries with backoff. Deterministic, monotonic event ids so tests can assert on
  *   them.
  *
- * TODO(Phase 5) — the fault-injection API. This is the interesting part:
+ * TODO(Part 5) — the fault-injection API. This is the interesting part:
  *   POST /_fault { kind, count?, delayMs?, amountDeltaMinor?, skewSeconds? }
  *     duplicate      deliver the next N webhooks twice           -> A1
  *     reorder        hold a webhook and deliver it after the next -> A3

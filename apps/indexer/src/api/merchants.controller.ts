@@ -1,7 +1,7 @@
 /**
  * MerchantsController — merchant-facing reads.
  *
- * TODO(Phase 6):
+ * TODO(Part 6):
  *   GET /merchants/:id/balance   from ledger_account_balances (2000 merchant_payable), never
  *                                from an eth_call — the ledger is what we owe, the chain is what
  *                                was delivered, and reconciliation is what proves they agree.

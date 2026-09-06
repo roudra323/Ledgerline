@@ -72,5 +72,18 @@ export default defineConfig([
       },
     },
   },
+  {
+    // Repo tooling run directly by node (scripts/docs-check.mjs) — ESM, with node's globals.
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      sourceType: "module",
+      globals: {
+        Buffer: "readonly",
+        URL: "readonly",
+        console: "readonly",
+        process: "readonly",
+      },
+    },
+  },
   prettier,
 ]);

@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 /// @title PaymentProcessor — settlement, refund and payout routing for StableUSD.
 /// @notice A conduit, never a vault. It holds no balance between transactions.
-/// @dev    TODO(Phase 2): implement.
+/// @dev    TODO(Part 2): implement.
 ///
 ///         struct Payment { address merchant; uint256 amount; uint256 fee; uint256 refunded; bool exists; }
 ///         mapping(bytes32 => Payment) public payments;
@@ -30,7 +30,7 @@ pragma solidity 0.8.28;
 ///         Events carry amount + fee + resulting total, so off-chain handlers are self-contained
 ///         and deterministic under replay. Keep it.
 ///
-///         TODO(Phase 2) invariant suite (PaymentProcessor.invariants.t.sol):
+///         TODO(Part 2) invariant suite (PaymentProcessor.invariants.t.sol):
 ///           - token.balanceOf(address(this)) == 0 after every action  (conduit, never a vault —
 ///             one line that kills a whole class of stuck-funds bugs)
 ///           - forall id: payments[id].refunded <= payments[id].amount
