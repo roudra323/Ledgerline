@@ -191,6 +191,26 @@ original defect in the comment so the test explains why it exists.
 testing the **changed file**, not the session: "I invoked `adversarial-tester`" is not the standard,
 "every file I changed was tested by someone who did not change it" is.
 
+## 3b. The enforcement script needed the most enforcing
+
+`scripts/docs-check.mjs` exists so documentation cannot drift from the schema. It shipped with
+**five** ways to report "no divergences" while checking nothing — more defects per line than any
+other file touched in this audit, which is worth sitting with, because it is the file whose whole
+purpose is catching defects:
+
+| Vacuous pass                                                                                                                                                                                                                                                                                  | Found by                       |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Only double-quoted `kind: "..."` was scanned, so a single-quoted sample posting an invalid kind slipped through                                                                                                                                                                               | `adversarial-tester`           |
+| A bare `/kind IN (/` picked "the" kind-defining migration, so any later unrelated `CHECK` on another table's `kind` column hijacked it                                                                                                                                                        | `adversarial-tester`           |
+| The docs scan was `readdirSync("docs")` with **no recursion**, so `docs/decisions/` and `docs/reviews/` were never read — the kinds check had been skipping every ADR since it was written, and the new lock check was scanning a directory that did not contain the file it existed to check | author, by mutation            |
+| `normaliseLock()` returns `""` for "no lock at all" — a real and the _most dangerous_ reading — but the guard was `if (!actualLock)`, so an unlocked trigger was indistinguishable from a parse failure and skipped the entire per-doc comparison, exactly when it most needed reporting      | `adversarial-tester`           |
+| Check 2b did not exist, so two documents claimed `FOR UPDATE` after the migration moved to `FOR NO KEY UPDATE` — twice, undetected                                                                                                                                                            | author, after the second drift |
+
+**The lesson is narrow and worth stating.** Four of the five were invisible to reading and to a green
+run; each was found only by _mutating_ an input and confirming the check went red. A check verified
+by reading is a check you have not verified. `scripts/docs-check.spec.mjs` now has 27 tests, every
+one of which constructs an input that should fail and proves it does.
+
 ## 4. Instructions
 
 - `CLAUDE.md` gained **Where facts live** — one owning file per fact; non-owners link rather than

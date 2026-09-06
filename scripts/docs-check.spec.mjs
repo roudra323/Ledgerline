@@ -395,3 +395,414 @@ test("check 5 (pointer files): rejects a pointer file that lost its marker", () 
     },
   );
 });
+
+// ── check 2b: the balance trigger's account read must show the lock it actually takes ────────────
+//
+// The first version of this check shipped broken: `markdownFiles()` was a flat `readdirSync("docs")`
+// with no recursion, so `docs/decisions/` — where the ADR this check exists to police lives — was
+// never scanned, and a doc claiming the wrong lock mode passed silently. Twice. Both the kinds scan
+// and the lock scan were made recursive in the same commit; the tests below hold that fix in place
+// for both checks, then exercise check 2b's own logic (the parser, and which of the migration's two
+// copies of the trigger function it trusts).
+
+/**
+ * A migration reproducing 1754006400007's actual shape: the trigger function is defined twice as
+ * template-literal constants — `lockingFn` (what `up()` installs) and `unlockedFn` (what `down()`
+ * restores) — and docs-check.mjs's `newestMigrationDefining()` trusts whichever copy appears FIRST
+ * in the file's source text, on the unstated assumption that that is always the up() copy. `order`
+ * lets a test flip which copy is textually first without changing what up()/down() actually call,
+ * to prove that assumption is doing real work rather than being vacuously true.
+ */
+function triggerMigrationSource(upLockClause, { order = "up-first" } = {}) {
+  const lockingFn = [
+    "const lockingFn = `",
+    "  CREATE OR REPLACE FUNCTION assert_transaction_balances() RETURNS trigger AS $$",
+    "  BEGIN",
+    "    SELECT normal_side, allows_negative",
+    "      INTO account_normal_side, account_allows_negative",
+    "      FROM ledger_accounts",
+    `     WHERE id = NEW.account_id${upLockClause};`,
+    "  END;",
+    "  $$ LANGUAGE plpgsql",
+    "`;",
+  ].join("\n");
+
+  const unlockedFn = [
+    "const unlockedFn = `",
+    "  CREATE OR REPLACE FUNCTION assert_transaction_balances() RETURNS trigger AS $$",
+    "  BEGIN",
+    "    SELECT normal_side, allows_negative",
+    "      INTO account_normal_side, account_allows_negative",
+    "      FROM ledger_accounts",
+    "     WHERE id = NEW.account_id;",
+    "  END;",
+    "  $$ LANGUAGE plpgsql",
+    "`;",
+  ].join("\n");
+
+  const definitions = order === "up-first" ? [lockingFn, unlockedFn] : [unlockedFn, lockingFn];
+
+  return [
+    "export class Trigger1700000000004 {",
+    "  async up(q) { return q.query(lockingFn); }",
+    "  async down(q) { return q.query(unlockedFn); }",
+    "}",
+    "",
+    ...definitions,
+    "",
+  ].join("\n");
+}
+
+/** A markdown fixture showing the trigger's account read with a given (possibly absent) lock. */
+function docShowingLock(lockClause) {
+  return [
+    "# Some doc",
+    "",
+    "```sql",
+    "SELECT normal_side, allows_negative",
+    "  FROM ledger_accounts",
+    ` WHERE id = NEW.account_id${lockClause};`,
+    "```",
+    "",
+  ].join("\n");
+}
+
+const TRIGGER_MIGRATION_PATH = "apps/indexer/src/migrations/1700000000004-Trigger.ts";
+const REAL_LOCK_CLAUSE = "\n       FOR NO KEY UPDATE";
+
+test("check 2b (lock): passes when the doc shows the same lock the migration actually takes", () => {
+  // Positive control: if this ever goes red, check 2b false-positives on a correct doc, which is as
+  // useless as never firing.
+  withFixture(
+    {
+      [TRIGGER_MIGRATION_PATH]: triggerMigrationSource(REAL_LOCK_CLAUSE),
+      "docs/extra.md": docShowingLock(REAL_LOCK_CLAUSE),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 0, `a correct doc must not be flagged; got:\n${output}`);
+    },
+  );
+});
+
+test("check 2b (lock): catches a doc claiming FOR UPDATE against a migration that takes FOR NO KEY UPDATE", () => {
+  // This is the exact divergence ADR-0017 exists to prevent: FOR UPDATE deadlocks against the
+  // composite FK's KEY SHARE lock (measured: 49 of 50 postings deadlocked). A doc telling a reader
+  // the trigger takes FOR UPDATE is actively dangerous, not just stale.
+  withFixture(
+    {
+      [TRIGGER_MIGRATION_PATH]: triggerMigrationSource(REAL_LOCK_CLAUSE),
+      "docs/extra.md": docShowingLock("\n FOR UPDATE"),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 1);
+      assert.match(
+        output,
+        /shows the balance trigger reading ledger_accounts FOR UPDATE, but it takes FOR NO KEY UPDATE/,
+      );
+    },
+  );
+});
+
+test("check 2b (lock): catches a doc claiming FOR SHARE against a migration that takes FOR NO KEY UPDATE", () => {
+  withFixture(
+    {
+      [TRIGGER_MIGRATION_PATH]: triggerMigrationSource(REAL_LOCK_CLAUSE),
+      "docs/extra.md": docShowingLock("\n FOR SHARE"),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 1);
+      assert.match(
+        output,
+        /shows the balance trigger reading ledger_accounts FOR SHARE, but it takes FOR NO KEY UPDATE/,
+      );
+    },
+  );
+});
+
+test("check 2b (lock): catches a doc that shows the account read with no lock clause at all", () => {
+  withFixture(
+    {
+      [TRIGGER_MIGRATION_PATH]: triggerMigrationSource(REAL_LOCK_CLAUSE),
+      "docs/extra.md": docShowingLock(""),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 1);
+      assert.match(
+        output,
+        /shows the balance trigger reading ledger_accounts with no lock, but it takes FOR NO KEY UPDATE/,
+      );
+    },
+  );
+});
+
+test("check 2b (lock) — recursion regression: catches a wrong-lock doc that lives in docs/decisions/", () => {
+  // This is the bug that shipped: markdownFiles() was `readdirSync("docs")` with no
+  // `withFileTypes`/recursion, so docs/decisions/ — where ADR-0017 itself lives — was never read. A
+  // revert of markdownFiles() to a flat scan must turn this test red.
+  withFixture(
+    {
+      [TRIGGER_MIGRATION_PATH]: triggerMigrationSource(REAL_LOCK_CLAUSE),
+      "docs/decisions/0099-fake-adr.md": docShowingLock("\n FOR UPDATE"),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 1, `a violation inside docs/decisions/ must be caught; got:\n${output}`);
+      assert.match(output, /docs\/decisions\/0099-fake-adr\.md/);
+    },
+  );
+});
+
+test("check 2b (lock) — recursion regression: catches a wrong-lock doc nested two levels deep", () => {
+  withFixture(
+    {
+      [TRIGGER_MIGRATION_PATH]: triggerMigrationSource(REAL_LOCK_CLAUSE),
+      "docs/reviews/2026-01-01/deep-dive.md": docShowingLock("\n FOR SHARE"),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(
+        status,
+        1,
+        `a violation two directories deep under docs/ must be caught; got:\n${output}`,
+      );
+      assert.match(output, /docs\/reviews\/2026-01-01\/deep-dive\.md/);
+    },
+  );
+});
+
+test("check 1 (kinds) — recursion regression: catches a bad posting kind that lives in docs/decisions/", () => {
+  withFixture(
+    {
+      "docs/decisions/0099-fake-adr.md": [
+        "# ADR",
+        "",
+        "```ts",
+        "await ledger.post({ kind: 'onramp.not_real', cause: { type: 'fiat_event', id: 'e' } });",
+        "```",
+        "",
+      ].join("\n"),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(
+        status,
+        1,
+        `a bad kind inside docs/decisions/ must be caught; got:\n${output}`,
+      );
+      assert.match(output, /docs\/decisions\/0099-fake-adr\.md posts kind 'onramp\.not_real'/);
+    },
+  );
+});
+
+test("check 1 (kinds) — recursion regression: catches a bad posting kind nested two levels deep", () => {
+  withFixture(
+    {
+      "docs/reviews/2026-01-01/deep-dive.md": [
+        "# Review",
+        "",
+        "```ts",
+        "await ledger.post({ kind: 'onramp.also_not_real', cause: { type: 'fiat_event', id: 'e' } });",
+        "```",
+        "",
+      ].join("\n"),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(
+        status,
+        1,
+        `a bad kind two directories deep under docs/ must be caught; got:\n${output}`,
+      );
+      assert.match(
+        output,
+        /docs\/reviews\/2026-01-01\/deep-dive\.md posts kind 'onramp\.also_not_real'/,
+      );
+    },
+  );
+});
+
+test("check 2b (lock) — an ADR's table of rejected alternatives naming FOR UPDATE in prose is not flagged", () => {
+  // ADR-0017's real "Alternatives considered" table names `FOR UPDATE` as a rejected alternative.
+  // That is legitimate prose, not a claim about what the trigger reads, and must not fail the build.
+  withFixture(
+    {
+      "docs/decisions/0017-non-negative-enforcement.md": [
+        "# ADR-0017",
+        "",
+        "The lock is `FOR NO KEY UPDATE`:",
+        "",
+        "```sql",
+        "SELECT normal_side, allows_negative INTO ...",
+        "  FROM ledger_accounts WHERE id = NEW.account_id",
+        "  FOR NO KEY UPDATE;",
+        "```",
+        "",
+        "## Alternatives considered",
+        "",
+        "| Alternative | Why it lost |",
+        "| --- | --- |",
+        "| `SELECT ... FOR UPDATE` on the `ledger_entries` rows instead | You cannot lock rows that do not exist yet. |",
+        "| `FOR UPDATE` conflicts with the `KEY SHARE` lock the composite FK takes | Deadlocks by construction. |",
+        "",
+      ].join("\n"),
+      [TRIGGER_MIGRATION_PATH]: triggerMigrationSource(REAL_LOCK_CLAUSE),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(
+        status,
+        0,
+        `prose discussing FOR UPDATE as a rejected alternative must not fail the build; got:\n${output}`,
+      );
+    },
+  );
+});
+
+test("check 2b (lock) — an unrelated FOR UPDATE lock on a different table is not flagged", () => {
+  // The walkthrough's §9 describes a genuine `SELECT ... FOR UPDATE` — on chain_accounts, for nonce
+  // allocation, nothing to do with the ledger balance trigger. The table name must matter: the
+  // pattern requires `ledger_accounts` specifically, so this must pass untouched.
+  withFixture(
+    {
+      "docs/extra.md": [
+        "# Chain writer",
+        "",
+        "### The FOR UPDATE row lock on nonces",
+        "",
+        "```sql",
+        "SELECT next_nonce FROM chain_accounts WHERE id = NEW.chain_account_id FOR UPDATE;",
+        "```",
+        "",
+      ].join("\n"),
+      [TRIGGER_MIGRATION_PATH]: triggerMigrationSource(REAL_LOCK_CLAUSE),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(
+        status,
+        0,
+        `a FOR UPDATE lock on an unrelated table must not be mistaken for the ledger trigger's; got:\n${output}`,
+      );
+    },
+  );
+});
+
+test("check 2b (lock) — normaliseLock() treats whitespace, newlines and case as insignificant", () => {
+  // A doc reproducing the migration's own multi-line, indented SQL formatting — lowercase, with the
+  // clause split across a line break — must still be recognised as matching FOR NO KEY UPDATE.
+  withFixture(
+    {
+      [TRIGGER_MIGRATION_PATH]: triggerMigrationSource(REAL_LOCK_CLAUSE),
+      "docs/extra.md": docShowingLock("\n       for no   key\n         update"),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(
+        status,
+        0,
+        `lowercase, re-wrapped whitespace must still normalise to FOR NO KEY UPDATE; got:\n${output}`,
+      );
+    },
+  );
+});
+
+test("check 2b (lock) — normaliseLock() does not confuse FOR NO KEY UPDATE with plain FOR UPDATE", () => {
+  // Guards the alternation order in normaliseLock()'s regex: `NO\s+KEY\s+UPDATE` must be tried before
+  // the bare `UPDATE` alternative, or a real `FOR NO KEY UPDATE` clause risks being reported back as
+  // the (wrong, deadlock-prone) `FOR UPDATE`.
+  withFixture(
+    {
+      [TRIGGER_MIGRATION_PATH]: triggerMigrationSource(REAL_LOCK_CLAUSE),
+      "docs/extra.md": docShowingLock("\n FOR UPDATE"), // deliberately the wrong clause
+    },
+    (root) => {
+      const { status, output } = run(root);
+      // Must be reported as an actual FOR UPDATE vs FOR NO KEY UPDATE mismatch, not misparsed into
+      // some other pair of strings (which would still fail, but for the wrong stated reason and
+      // would mask a parser regression under a coincidentally-still-failing test).
+      assert.equal(status, 1);
+      assert.match(output, /reading ledger_accounts FOR UPDATE, but it takes FOR NO KEY UPDATE/);
+    },
+  );
+});
+
+test("check 2b (lock) — newestMigrationDefining() trusts the FIRST definition in the file, which is up()'s", () => {
+  // 1754006400007 defines the trigger function twice: `lockingFn` (installed by up(), textually
+  // first in the file) and `unlockedFn` (restored by down(), textually second). docs-check.mjs reads
+  // whichever definition comes first in the source text and assumes it is up()'s — a positional
+  // assumption, not a semantic one. With the real (up-first) ordering, a doc matching the locked
+  // clause must pass.
+  withFixture(
+    {
+      [TRIGGER_MIGRATION_PATH]: triggerMigrationSource(REAL_LOCK_CLAUSE, { order: "up-first" }),
+      "docs/extra.md": docShowingLock(REAL_LOCK_CLAUSE),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 0, `up-first ordering must compare against the locked version; got:\n${output}`);
+    },
+  );
+});
+
+test("check 2b (lock) — regression canary: reordering the migration's two function copies silently flips what the check trusts", () => {
+  // Same migration content as the previous test, only the two `const` definitions swapped so the
+  // *unlocked* (down()) copy is textually first. docs-check.mjs has no way to tell up() from down()
+  // by meaning — it just reads the first CREATE OR REPLACE it finds — so this flips its ground truth
+  // to "no lock" even though up() still installs the locked function. A doc that correctly says
+  // FOR NO KEY UPDATE now gets flagged as wrong.
+  //
+  // This is not asserting docs-check.mjs is broken today — the real migration file happens to define
+  // the locked copy first. It is a canary: if a future edit to 1754006400007-LedgerNonNegativeLock.ts
+  // (or to newestMigrationDefining()) ever changes which copy is textually first, this test's twin
+  // above and this one demonstrate exactly how the check's ground truth would silently flip with it,
+  // with nothing in the check itself able to notice.
+  withFixture(
+    {
+      [TRIGGER_MIGRATION_PATH]: triggerMigrationSource(REAL_LOCK_CLAUSE, { order: "down-first" }),
+      "docs/extra.md": docShowingLock(REAL_LOCK_CLAUSE),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(
+        status,
+        1,
+        `reordering the two definitions must flip the check's ground truth to "no lock"; got:\n${output}`,
+      );
+      assert.match(
+        output,
+        /shows the balance trigger reading ledger_accounts FOR NO KEY UPDATE, but it takes no lock/,
+      );
+    },
+  );
+});
+
+test("check 2b (lock) — a genuinely unlocked trigger (no lock clause at all) is reported, not swallowed as unparseable", () => {
+  // Found while writing the canary above: normaliseLock() returns "" for a legitimate "no lock
+  // clause" reading, but docs-check.mjs's original `if (!actualLock)` treated that identically to
+  // `actual === null` ("the SELECT wasn't found at all"). Empty string is falsy in JS, so the moment
+  // the trigger's account read has genuinely no lock — e.g. a regression that silently drops
+  // FOR NO KEY UPDATE, exactly the class of bug ADR-0017 exists to prevent — the check printed the
+  // generic "could not read the account lock clause" message and skipped the entire per-doc
+  // comparison, never naming which docs were wrong. Fixed in the same commit as this test by checking
+  // `actual === null` instead of `!actualLock`.
+  withFixture(
+    {
+      [TRIGGER_MIGRATION_PATH]: triggerMigrationSource(""), // the up() copy itself carries no lock
+      "docs/extra.md": docShowingLock(REAL_LOCK_CLAUSE), // doc still claims FOR NO KEY UPDATE
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 1);
+      assert.match(
+        output,
+        /docs\/extra\.md shows the balance trigger reading ledger_accounts FOR NO KEY UPDATE, but it takes no lock/,
+        `an unlocked trigger must be compared per-doc, not reported as unparseable; got:\n${output}`,
+      );
+      assert.doesNotMatch(output, /could not read the account lock clause/);
+    },
+  );
+});

@@ -205,9 +205,15 @@ const triggerMigration = newestMigrationDefining(
 if (triggerMigration) {
   const actual = ACCOUNT_LOCK_READ.exec(triggerMigration.source);
   ACCOUNT_LOCK_READ.lastIndex = 0;
+  // `normaliseLock()` legitimately returns "" when the account read has no lock clause at all — that
+  // is a real, meaningful reading (and the most dangerous one, since it means the concurrency fix
+  // ADR-0017 describes is absent), not a parse failure. Only `actual === null` (the SELECT itself was
+  // not found) means "could not read"; `!actualLock` would treat those two cases identically and
+  // skip the entire per-doc comparison below exactly when the trigger is unlocked and that fact needs
+  // reporting the loudest.
   const actualLock = actual ? normaliseLock(actual[1]) : null;
 
-  if (!actualLock) {
+  if (actualLock === null) {
     fail(
       "lock",
       `could not read the account lock clause from ${triggerMigration.name}`,
@@ -221,7 +227,7 @@ if (triggerMigration) {
         if (documented !== actualLock) {
           fail(
             "lock",
-            `${file} shows the balance trigger reading ledger_accounts ${documented || "with no lock"}, but it takes ${actualLock}`,
+            `${file} shows the balance trigger reading ledger_accounts ${documented || "with no lock"}, but it takes ${actualLock || "no lock"}`,
             triggerMigration.name,
           );
         }
