@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 
 import "reflect-metadata";
+import { Counter, Registry } from "prom-client";
 import { DataSource } from "typeorm";
 
 import { appDataSourceOptions } from "../src/data-source";
 import { AccountRegistryService } from "../src/ledger/account-registry.service";
 import { LedgerAccount } from "../src/ledger/entities/ledger-account.entity";
 import { LedgerService } from "../src/ledger/ledger.service";
+import { MetricsService } from "../src/observability/metrics.service";
 import type { PostingRequest } from "../src/ledger/ledger.types";
 
 /**
@@ -23,14 +25,24 @@ describe("LedgerService.post()", () => {
     dataSource = new DataSource(appDataSourceOptions);
     await dataSource.initialize();
     const accounts = new AccountRegistryService(dataSource.getRepository(LedgerAccount));
-    ledger = new LedgerService(dataSource, accounts);
+    const metrics = new MetricsService(
+      new Counter({
+        name: "ledgerline_ledger_entries_written_total",
+        help: "test",
+        labelNames: ["kind"],
+        registers: [new Registry()],
+      }),
+    );
+    ledger = new LedgerService(dataSource, accounts, metrics);
   });
 
   afterAll(async () => {
     await dataSource.destroy();
   });
 
-  async function entriesFor(transactionId: string): Promise<{ direction: string; amount_minor: string }[]> {
+  async function entriesFor(
+    transactionId: string,
+  ): Promise<{ direction: string; amount_minor: string }[]> {
     return dataSource.query(
       `SELECT direction, amount_minor FROM ledger_entries WHERE transaction_id = $1 ORDER BY sequence`,
       [transactionId],
@@ -85,7 +97,13 @@ describe("LedgerService.post()", () => {
       cause: { type: "fiat_event", id: causeId },
       entries: [
         { accountCode: "1100", direction: "debit", assetCode: "USDX", amountMinor: "7000000" },
-        { accountCode: "2000", direction: "credit", assetCode: "USDX", amountMinor: "7000000", merchantId },
+        {
+          accountCode: "2000",
+          direction: "credit",
+          assetCode: "USDX",
+          amountMinor: "7000000",
+          merchantId,
+        },
       ],
     });
 

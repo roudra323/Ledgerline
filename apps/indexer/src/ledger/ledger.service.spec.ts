@@ -1,4 +1,7 @@
+import { Counter, Registry } from "prom-client";
 import type { DataSource } from "typeorm";
+
+import { MetricsService } from "../observability/metrics.service";
 
 import type { AccountRegistryService } from "./account-registry.service";
 import { LedgerService } from "./ledger.service";
@@ -10,6 +13,17 @@ import type { PostingRequest } from "./ledger.types";
  * Block 1.4 database trigger.
  */
 describe("LedgerService.post() validation", () => {
+  /** A real counter on a throwaway registry — a stubbed metric is a call that cannot fail. */
+  function buildMetrics(): MetricsService {
+    const counter = new Counter({
+      name: "ledgerline_ledger_entries_written_total",
+      help: "test",
+      labelNames: ["kind"],
+      registers: [new Registry()],
+    });
+    return new MetricsService(counter);
+  }
+
   function buildService(): LedgerService {
     const dataSource = {
       createQueryRunner: () => {
@@ -17,11 +31,19 @@ describe("LedgerService.post() validation", () => {
       },
     } as unknown as DataSource;
     const accounts = {} as AccountRegistryService;
-    return new LedgerService(dataSource, accounts);
+    return new LedgerService(dataSource, accounts, buildMetrics());
   }
 
-  const platformDebitUsd = { accountCode: "1000", direction: "debit" as const, assetCode: "USD" as const };
-  const platformCreditUsd = { accountCode: "2100", direction: "credit" as const, assetCode: "USD" as const };
+  const platformDebitUsd = {
+    accountCode: "1000",
+    direction: "debit" as const,
+    assetCode: "USD" as const,
+  };
+  const platformCreditUsd = {
+    accountCode: "2100",
+    direction: "credit" as const,
+    assetCode: "USD" as const,
+  };
 
   it("rejects a posting with fewer than two entries", async () => {
     const service = buildService();

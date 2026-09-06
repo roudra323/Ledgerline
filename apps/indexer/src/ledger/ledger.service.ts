@@ -2,6 +2,8 @@ import { Injectable } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 import { DataSource, type QueryRunner } from "typeorm";
 
+import { MetricsService } from "../observability/metrics.service";
+
 import { AccountRegistryService } from "./account-registry.service";
 import type { PostingLeg, PostingRequest, PostingResult } from "./ledger.types";
 
@@ -17,6 +19,7 @@ export class LedgerService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly accounts: AccountRegistryService,
+    private readonly metrics: MetricsService,
   ) {}
 
   /**
@@ -57,6 +60,7 @@ export class LedgerService {
     const result = await this.insertTransactionHeader(queryRunner, request);
     if (!result.alreadyPosted) {
       await this.insertEntries(queryRunner, result.transactionId, request.entries);
+      this.metrics.recordLedgerEntriesWritten(request.kind, request.entries.length);
     }
     return result;
   }

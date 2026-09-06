@@ -6,6 +6,7 @@ import { HealthController } from "./api/health.controller";
 import { ConfigModule } from "./config/config.module";
 import { appDataSourceOptions } from "./data-source";
 import { LedgerModule } from "./ledger/ledger.module";
+import { ObservabilityModule } from "./observability/observability.module";
 
 /**
  * Root module.
@@ -34,6 +35,7 @@ import { LedgerModule } from "./ledger/ledger.module";
     ConfigModule,
     TypeOrmModule.forRoot(appDataSourceOptions),
     ScheduleModule.forRoot(),
+    ObservabilityModule,
     LedgerModule,
   ],
   controllers: [HealthController],

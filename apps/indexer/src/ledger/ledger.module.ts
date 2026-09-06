@@ -1,6 +1,8 @@
 import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
 
+import { ObservabilityModule } from "../observability/observability.module";
+
 import { AccountRegistryService } from "./account-registry.service";
 import { Asset } from "./entities/asset.entity";
 import { LedgerAccountBalance } from "./entities/ledger-account-balance.entity";
@@ -17,6 +19,7 @@ import { LedgerService } from "./ledger.service";
  */
 @Module({
   imports: [
+    ObservabilityModule,
     TypeOrmModule.forFeature([
       Asset,
       LedgerAccount,

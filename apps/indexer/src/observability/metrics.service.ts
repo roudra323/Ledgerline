@@ -1,28 +1,41 @@
-/**
- * MetricsService — owns every ledgerline_* Prometheus instrument.
- *
- * Naming: `ledgerline_` prefix, standard units, LOW-cardinality labels only
- * (sync_key, event_name, provider, contract, route) — NEVER user addresses or tx hashes.
- *
- * TODO(Part 7) register the full instrument set (see docs/observability.md):
- *   Indexer health:
- *     ledgerline_indexer_lag_blocks{sync_key}                gauge
- *     ledgerline_indexer_lag_seconds{sync_key}               gauge
- *     ledgerline_chunk_size{sync_key}                        gauge
- *     ledgerline_chunks_processed_total{sync_key,result}     counter
- *     ledgerline_chunk_duration_seconds{sync_key,phase}      histogram
- *     ledgerline_events_ingested_total{contract,event_name}  counter
- *     ledgerline_events_failed_total{event_name}             counter
- *     ledgerline_events_retried_total{event_name,result}     counter
- *     ledgerline_reorg_rollbacks_total{sync_key}             counter
- *     ledgerline_reorg_depth_blocks                          histogram
- *     ledgerline_reconciliation_drift_wei                    gauge
- *     ledgerline_catchup_remaining_blocks{sync_key}          gauge
- *   RPC layer:
- *     ledgerline_rpc_requests_total{provider,method,result}      counter
- *     ledgerline_rpc_request_duration_seconds{provider,method}   histogram
- *     ledgerline_rpc_provider_healthy{provider}                  gauge (0/1)
- *   API (RED) + default prom-client runtime metrics + pg pool gauges.
- */
+import { Injectable } from "@nestjs/common";
+import { InjectMetric } from "@willsoto/nestjs-prometheus";
+import { Counter } from "prom-client";
 
-export {};
+/** Instrument names, from docs/observability.md §1 — the owner of this table. */
+export const LEDGER_ENTRIES_WRITTEN = "ledgerline_ledger_entries_written_total";
+
+/**
+ * MetricsService — the one place that owns every `ledgerline_*` Prometheus instrument.
+ *
+ * Names, types and labels are specified in docs/observability.md §1, which owns them; this class
+ * is an implementation of that table. **The permitted label set there is exhaustive.** Never a
+ * merchant id, customer id, address, tx hash or payment id — unbounded label cardinality is how you
+ * take a Prometheus down. Those identifiers belong in span attributes and structured logs, where
+ * cardinality is free and where you actually need them during an incident.
+ *
+ * Instruments are added as the paths that emit them are built, not in one batch at the end:
+ * CLAUDE.md's definition of done requires a metric on every new path, and a checklist item you
+ * cannot satisfy is one that gets skipped.
+ *
+ * TODO(Part 7): the remaining ~45 instruments in docs/observability.md §1, plus the RED-method HTTP
+ * interceptor covering every route automatically.
+ */
+@Injectable()
+export class MetricsService {
+  constructor(
+    @InjectMetric(LEDGER_ENTRIES_WRITTEN)
+    private readonly ledgerEntriesWritten: Counter<"kind">,
+  ) {}
+
+  /**
+   * Counts entry rows actually inserted, labelled by the transaction kind that caused them.
+   *
+   * Called only when a posting really wrote — a redelivered cause that resolves to
+   * `alreadyPosted` inserts nothing, and counting it would overstate ledger activity and mask a
+   * genuine drop in throughput behind retry noise.
+   */
+  recordLedgerEntriesWritten(kind: string, entryCount: number): void {
+    this.ledgerEntriesWritten.inc({ kind }, entryCount);
+  }
+}
