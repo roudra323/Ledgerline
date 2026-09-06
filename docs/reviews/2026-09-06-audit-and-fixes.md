@@ -1,0 +1,174 @@
+# Audit and fixes — 2026-09-06
+
+A full review of the repository (every document, all source, six migrations, the tests, CI and the
+infra scaffolding) against its own binding rules, and what was changed as a result.
+
+**Baseline:** `3915c45`, plus Block 1.6's work which was complete in the working tree but uncommitted.
+
+---
+
+## Why the process half of this happened
+
+Four files stated the project's rules — `CLAUDE.md`, `AGENTS.md`, `.agents/rules/conventions.md` and
+`docs/conventions.md` — and three were lossy paraphrases of the others. An agent could read one, miss
+a rule that lived only in another, and be confident it had complied. `.agents/rules/conventions.md`
+said "never log high-cardinality labels" without mentioning that `observability.md` §1 defines an
+**exhaustive permitted set**, so an agent reading only that file would invent a label and believe it
+was following the rules.
+
+The same disease affected facts, not just rules. The chart of accounts and the transaction `kind`
+list each appeared in a migration **and** in three prose documents, and the copies had already
+diverged badly enough that the implementation guide's own code sample could not execute.
+
+Every fix below is downstream of that. The first change was to give every fact one owner and make a
+script enforce it; without that, this list regenerates itself in three months.
+
+---
+
+## 1. Correctness
+
+### 1.1 `convert()` returned an unpostable residual — `money.ts`
+
+ADR-0001 requires the FX residual to be journaled to `3900 rounding_residual`, never dropped, but
+never said what **unit** it is in. The implementation returned the raw remainder of its internal
+division, whose unit silently changed with the direction of the scale change: source minor units when
+downscaling, but a fraction of a **target** minor unit divided by `rateDen` when upscaling.
+
+Converting 10000 USD cents to USDX at 1/3 returned `residual = 1`, meaning one third of one USDX minor
+unit — a quantity of no asset, which `numeric(38,0)` cannot hold and no account can. At a 1:1 rate the
+downscale case coincidentally equals source minor units, which is why both existing assertions passed
+against a wrong function for the life of Block 1.1.
+
+**Fixed.** `residual` is now the part of `amountMinor` too small to buy another whole target minor
+unit, in the source asset. Both pre-existing assertions still pass unchanged. See
+[ADR-0015](../decisions/0015-rounding-residual-unit.md).
+
+**A second bug inside the fix, caught by `adversarial-tester`.** The first version computed `consumed`
+with floor division, which double-floors: `convert("1", 0, 1, "1", "3")` reported buying 3 target
+units **and** leaving the whole source unit as residual — it would have double-booked the same unit,
+the mirror image of the original bug. Now ceiling division.
+
+**Also fixed here.** `BigInt("")` and `BigInt("   ")` are both `0n`, so a webhook with a blank amount
+posted a legitimate-looking zero-value leg instead of failing loudly. Amount strings are now validated
+as plain integers. And `fromDecimals`/`toDecimals` are bounded to `0..18` mirroring the `assets`
+table's `CHECK` — `10n ** BigInt(huge)` hung rather than threw.
+
+### 1.2 The non-negative check was not concurrency-safe — `1754006400004`
+
+The check derived an account's balance with a bare `SUM` over `ledger_entries`. The trigger is
+deferred so it runs at COMMIT, but under `READ COMMITTED` it still sees committed rows only: two
+transactions reaching their commit-time trigger together each read a balance excluding the other's
+entries, both pass, and an `allows_negative = false` account goes negative.
+
+Textbook write-skew, and precisely Part 1's exit criterion — _20 concurrent payouts against float for
+10 → exactly 10_ — which could have yielded 11.
+
+**Fixed** in `1754006400007` by locking the account row the trigger already reads (`FOR UPDATE`), so
+concurrent commits touching one account queue. See
+[ADR-0017](../decisions/0017-non-negative-enforcement.md), including why a deadlock here is the
+correct failure.
+
+**A consequence only running the tests revealed:** `SELECT ... FOR UPDATE` requires `UPDATE`
+privilege, and `ledgerline_app` deliberately has only `SELECT` and `INSERT` on `ledger_accounts`. Every
+posting failed at COMMIT with `permission denied`. The function is now `SECURITY DEFINER` with a
+pinned `search_path` — a privilege boundary that must stay tiny and auditable.
+
+### 1.3 An entry's asset was not tied to its account's asset
+
+Nothing in the schema stopped a `USD` entry pointing at a `USDX` account. The application path was safe
+only by accident, and `resolveMerchantAccount` would happily **create** a `2000 merchant_payable` in
+`USD` even though the chart of accounts says `2000` is USDX. Any second writer — a migration, a `psql`
+session, Part 4's reorg reversal — had no guard at all, and an ungrouped `SUM(amount_minor)` across a
+mismatched entry produces a plausible-looking, wrong number.
+
+**Fixed.** Composite foreign key `ledger_entries (account_id, asset_code) → ledger_accounts (id,
+asset_code)`, and each merchant account code now pins its asset so a wrong-asset resolve is rejected
+rather than silently creating an account. New failure mode **C10**.
+
+### 1.4 `createMerchantAccount` had a check-then-insert race
+
+`findOne` → miss → `save`. Two first-time payments for one merchant both missed, and the loser got a
+raw unique violation that failed a legitimate payment.
+
+**Fixed.** `INSERT ... ON CONFLICT DO NOTHING` plus a re-select. New failure mode **C11**.
+
+### 1.5 `posted_at` was documented as set by `post()` and never was
+
+The entity docstring claimed replays could back-date postings. They could not, so a replay would have
+stamped rebuilt history with the replay's clock and silently broken Part 4's replay-determinism
+deep-equal. **Fixed** — `postedAt` is threaded through `PostingRequest`.
+
+---
+
+## 2. Docs that contradicted the schema
+
+| Divergence                                                                                                                                                                                                                                                            | Resolution                                                                                                                                                                                                                            |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `architecture.md`, `implementation-guide.md` and `learning-path.md` all post `onramp.capture`/`.fx`/`.reserve`/`.settled`; the `CHECK` accepted eight snake_case values and had no `fx` or `reserve` kind, so the documented four-posting on-ramp was not expressible | Schema moved to the dotted vocabulary ([ADR-0016](../decisions/0016-transaction-kind-vocabulary.md)) — the docs were right and are the teaching material. `kind` is half the idempotency key, so **the set is append-only from here** |
+| Block 1.6's `Verify` step said "read the balances back"; `post()` does not write balances                                                                                                                                                                             | That half moved to Block 1.7, where the projection is built                                                                                                                                                                           |
+| Failure mode **C1** specified `residual < 1` minor unit of the **target** asset — the exact unit ADR-0015 removed — and claimed upscaling is always exact                                                                                                             | Rewritten for the source-asset residual; exactness only holds when the rate divides evenly                                                                                                                                            |
+| Failure mode **C4** described the check as running "against the row-locked balances projection", which does not exist yet                                                                                                                                             | Rewritten to describe what actually enforces it today, and what Block 1.7 changes                                                                                                                                                     |
+| `TODO(Phase N)` markers in 41 files; the numbers were wrong, not merely mislabelled — observability said Phase 3/4 for Part 7 work, everything under `blockchain/` said Phase 1/2 for Part 4 work                                                                     | All retargeted to `Block N.M` or `Part N`; `docs:check` now rejects `TODO(Phase …)`                                                                                                                                                   |
+| `progress.md`'s health check told you to run `pnpm contracts-test` and `pnpm test:integration`; neither existed at the root                                                                                                                                           | Script fixed, root `test:integration` added, and `docs:check` now verifies every command in that table                                                                                                                                |
+| `base-audit.entity.ts` claimed four tables are equally immutable; only two have the trigger                                                                                                                                                                           | Docstring now says which layer protects which                                                                                                                                                                                         |
+
+---
+
+## 3. Definition-of-done gaps on blocks already ✅
+
+- **No metrics existed anywhere.** `ObservabilityModule` was named in `app.module.ts`'s comment but
+  absent from its `imports`, and `metrics.service.ts` was an `export {}` stub. There was no `/metrics`
+  endpoint, so "every new path gets a metric" was **unenforceable**, not merely unenforced — which is
+  why the most-called function in the project shipped emitting nothing. Wired, with the one instrument
+  `observability.md` §1.3 already specifies.
+- **Integration tests were not in CI.** The job was an `echo`. Every ledger guarantee proven so far
+  ran on one laptop. Now a `postgres:17-alpine` service and a real run.
+- **Integration tests were not isolated.** They write into deliberately immutable tables and cannot
+  clean up, so every run accumulated rows — compounding, since the non-negative trigger scans an
+  account's whole history. Now a throwaway database per run, which also proves the migrations apply
+  from nothing every time.
+- **The two subagents were never invoked.** `.claude/agents/ledger-reviewer.md` and
+  `adversarial-tester.md` both say "MUST be invoked", but only those files said so and nothing reads
+  them until someone invokes the agent. Now in the working rhythm and the definition of done. Both
+  earned it immediately: `adversarial-tester` found the ceiling-division bug in §1.1.
+
+---
+
+## 4. Instructions
+
+- `CLAUDE.md` gained **Where facts live** — one owning file per fact; non-owners link rather than
+  restate; when two disagree the owner wins and the disagreement is a bug, not a choice.
+- `AGENTS.md` and `.agents/rules/conventions.md` are now pointers with no rules of their own.
+- Every definition-of-done line names the command that checks it.
+- `CLAUDE.md` gained **Shapes that are always wrong here**, each drawn from a defect in this audit.
+- `pnpm docs:check` (in `pnpm lint`) enforces five doc↔schema agreements mechanically.
+
+---
+
+## 5. Deliberately not fixed
+
+| Item                                                                                                                    | Why, and when                                                                                                                                                                                                                                              |
+| ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The non-negative check still re-derives from the account's full history on every insert — `O(entries)` per row, forever | The fix is to read the locked `ledger_account_balances` row, which is **Block 1.7's** entire purpose. Merging a feature block into a fix pass would break the one-block-per-session rule and make this record unreadable. `TODO(Block 1.7)` marks the spot |
+| The balance trigger is `FOR EACH ROW`, so an N-leg posting aggregates N times at COMMIT                                 | Same fix, same block                                                                                                                                                                                                                                       |
+| `alreadyPosted` does not verify the new legs match the stored ones                                                      | The right shape for a request fingerprint depends on **Block 6.2's** idempotency-key work, which already stores a `request_hash` for exactly this. Resolve it there, not later                                                                             |
+| Only one of ~45 metrics is registered                                                                                   | The rest land with the paths that emit them (**Part 7** for the aggregate reconciler gauges). The point of wiring the module now is that the checklist item is satisfiable, not that the dashboard is complete                                             |
+| `forge install` in CI is unpinned                                                                                       | **Block 2.0** is where the versions are actually chosen. Pinning to a guessed tag today would be worse than the honest `TODO(Block 2.0)`                                                                                                                   |
+| `fx_clearing` is numbered `1800`/`1810`, inside the `1xxx` asset range, while typed `equity`                            | Renumbering seeded accounts that an in-progress ledger already references buys consistency at the cost of a data migration. Documented rather than moved; revisit only if the chart is reseeded                                                            |
+| The payout state machine in `build-plan.md` credits `token_in_transit` twice with no debit                              | As written the non-negative trigger would now reject it — reliably, after the lock fix. Almost certainly state-diagram shorthand rather than real postings, but it must be resolved **before Part 9**                                                      |
+
+---
+
+## 6. Verification actually run
+
+| Gate                                                                    | Result               |
+| ----------------------------------------------------------------------- | -------------------- |
+| `pnpm lint` (eslint + `docs:check`)                                     | clean                |
+| `pnpm typecheck`                                                        | clean                |
+| `pnpm test`                                                             | 53 passed            |
+| `pnpm test:integration` against a freshly created and migrated database | see §7               |
+| CI workflow YAML                                                        | parsed and validated |
+
+Not run: `forge build` / `forge test` (Part 2 unstarted, the test contracts are empty stubs), and
+`docker compose config` (the Docker daemon was not running on this machine — the Postgres used for
+integration testing was the local `postgresql@17`).

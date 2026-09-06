@@ -351,8 +351,9 @@ second code path. Two layers that fail differently is not duplication.
 
 **Needed by.** Blocks 5.4, 6.4, 8.x, 9.x — every place money moves.
 
-**Verify.** Post a balanced transaction; read the balances back. Post the same `cause` twice; assert
-**one** transaction row exists.
+**Verify.** Post a balanced transaction; read the **entries** back. Post the same `cause` twice;
+assert **one** transaction row exists and the entries are not duplicated. (Reading _balances_ back
+belongs to 1.7 — `post()` does not write the projection yet.)
 
 ---
 
@@ -389,6 +390,10 @@ float inside exactly this lock.
 **Needed by.** Block 6.4 (float reservation), Block 7.1 (invariant I2), the read API.
 
 **Verify.** Fire 20 concurrent payouts against float covering 10. **Exactly 10 succeed.** Not 11.
+Also read the balances back after a posting — the half of Block 1.6's verification that needs this
+block. Move the non-negative trigger's balance read onto the locked `ledger_account_balances` row
+while you are here: it currently re-derives from the account's whole history on every insert
+(`TODO(Block 1.7)` in `1754006400007`, and see [ADR-0017](decisions/0017-non-negative-enforcement.md)).
 
 ---
 

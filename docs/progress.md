@@ -220,16 +220,17 @@ Cut from the bottom if time runs short. See [`build-plan.md` §3.1](build-plan.m
 
 Re-run before every commit. Update the date when you do.
 
-| Check       | Command                    | Last green                                             |
-| ----------- | -------------------------- | ------------------------------------------------------ |
-| Lint        | `pnpm lint`                | 2026-08-30                                             |
-| Typecheck   | `pnpm typecheck`           | 2026-08-30                                             |
-| Format      | `pnpm format:check`        | 2026-08-03                                             |
-| Contracts   | `pnpm contracts:test`      | — _(no tests yet, Part 2)_                             |
-| Unit        | `pnpm test`                | 2026-08-30 — money.ts + LedgerService validation       |
-| Integration | `pnpm test:integration`    | 2026-08-30 — non-negative check + LedgerService.post() |
-| Compose     | `docker compose config -q` | 2026-08-01                                             |
-| Alert rules | `promtool check rules`     | 2026-08-01 — 25 rules                                  |
+| Check          | Command                    | Last green                                     |
+| -------------- | -------------------------- | ---------------------------------------------- |
+| Lint           | `pnpm lint`                | 2026-09-06 — now also runs `docs:check`        |
+| Docs vs schema | `pnpm docs:check`          | 2026-09-06 — 5 doc/schema assertions           |
+| Typecheck      | `pnpm typecheck`           | 2026-09-06                                     |
+| Format         | `pnpm format:check`        | 2026-08-03                                     |
+| Contracts      | `pnpm contracts:test`      | — _(no tests yet, Part 2)_                     |
+| Unit           | `pnpm test`                | 2026-09-06 — 53 tests                          |
+| Integration    | `pnpm test:integration`    | 2026-09-06 — throwaway DB per run, now in CI   |
+| Compose        | `docker compose config -q` | 2026-08-01 — _(Docker not running 2026-09-06)_ |
+| Alert rules    | `promtool check rules`     | 2026-08-01 — 25 rules                          |
 
 ---
 
@@ -237,6 +238,41 @@ Re-run before every commit. Update the date when you do.
 
 Newest first. Record anything a future reader would need: decisions taken, things that surprised
 you, blocks cut and why, questions you couldn't answer.
+
+### 2026-09-06 — Full-repository audit, and the fixes
+
+Reviewed every document, all source, six migrations, the tests, CI and the infra scaffolding against
+this project's own rules. Full record, including what was deliberately **not** fixed and why, in
+[`reviews/2026-09-06-audit-and-fixes.md`](reviews/2026-09-06-audit-and-fixes.md).
+
+**The root cause of the process failures was structural.** Four files stated the rules and three were
+lossy paraphrases, so an agent could read one, miss a rule living only in another, and believe it had
+complied. Facts had the same problem: the chart of accounts and the `kind` list each lived in a
+migration _and_ three prose docs, and had drifted far enough that the implementation guide's own code
+sample raised a `CHECK` violation. `CLAUDE.md` now names one owning file per fact, the other rule
+files are pointers with no content of their own, and `pnpm docs:check` fails the build on divergence.
+
+**Four correctness bugs, two of them money bugs.** `convert()` returned a residual whose unit changed
+with the scale direction — unpostable when upscaling, so ADR-0001's "journal the dust, never drop it"
+could not actually be carried out (ADR-0015). The non-negative check read balances without a lock, so
+two concurrent commits could each pass and drive an account negative — exactly Part 1's exit
+criterion, which could have yielded 11 of 20 (ADR-0017). An entry's asset was not bound to its
+account's asset. `createMerchantAccount` was a check-then-insert race.
+
+**Two things worth remembering.** Both existing `convert()` assertions passed against the wrong
+function, because at a 1:1 rate the wrong unit coincidentally equals the right one — a passing test
+proved nothing because it never varied the parameter that mattered. And the `FOR UPDATE` fix failed on
+first run with `permission denied`: `ledgerline_app` has no `UPDATE` grant on `ledger_accounts` by
+design, so the trigger had to become `SECURITY DEFINER`. Neither was findable by reading.
+
+**Blocks 1.4, 1.5 and 1.6 keep their original completion dates above.** They were done as specified;
+the specification and its enforcement were what needed work. The fixes are separate commits.
+
+**Definition-of-done gaps closed:** metrics are possible at all now (`ObservabilityModule` was in
+`app.module.ts`'s _comment_ but never its imports), integration tests run in CI against a throwaway
+database, and `adversarial-tester` / `ledger-reviewer` are in the working rhythm rather than only in
+their own definitions. `adversarial-tester` earned it immediately — it found a ceiling-division bug in
+the `convert()` fix itself.
 
 ### 2026-08-30 — Block 1.4, a doc-alignment correction found while explaining Block 1.6
 
@@ -292,7 +328,7 @@ Repo was a docs-complete, code-empty scaffold, so switching cost was near zero.
 installed; the compose deployer exited successfully while producing nothing — now writes an
 explicit `"placeholder": true` marker; all compose images pinned off `:latest`.
 
-**Open question:** the on-disk directory is still `ChainStake/`. Cosmetic, rename whenever.
+**Open question:** ~~the on-disk directory is still `ChainStake/`~~ — resolved 2026-09-06; it is `Ledgerline/`.
 
 ---
 
