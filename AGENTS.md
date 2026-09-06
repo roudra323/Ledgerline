@@ -1,9 +1,14 @@
 # Ledgerline Agent Instructions
 
-Always follow the binding project conventions and rules defined in `CLAUDE.md`, `docs/conventions.md`, and `.agents/rules/conventions.md`.
+The binding rules live in exactly two files. Read both. Do not work from a summary — this file
+deliberately contains **no rules of its own**, because a second copy of a rule is a second version
+of the truth, and the two will disagree before anyone notices.
 
-- **Working Rhythm**: `make it work → make it correct (tests) → make it observable → commit.`
-- **Money Handling**: Integer minor units as strings (`AmountMinor`), floor division + fee derivation, journal rounding residuals. Never JS `number`.
-- **Fail Loud at Boot**: Validate all environment variables at startup.
-- **Progress Tracking**: Update `docs/progress.md` in the same commit as the work.
-- **Code Style**: Use guard clauses first (`if (...) { throw ... }`), explicit return types, double quotes, no `any`, no non-null `!`, comment the _why_ not the _what_.
+- [`CLAUDE.md`](CLAUDE.md) — golden rules, where facts live, working rhythm, definition of done
+- [`docs/conventions.md`](docs/conventions.md) — the coding contract
+
+`CLAUDE.md`'s **Where facts live** table tells you which single file owns any fact you need. When
+two files disagree, the owner wins and the disagreement is a bug to report, not a reading to pick
+between.
+
+<!-- ssot:pointer-only — `pnpm docs:check` fails if this file grows rule text -->
