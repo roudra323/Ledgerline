@@ -39,7 +39,7 @@ describe("LedgerService.post()", () => {
 
   it("posts a balanced transaction and the entries are readable back", async () => {
     const request: PostingRequest = {
-      kind: "payment_captured",
+      kind: "onramp.capture",
       cause: { type: "fiat_event", id: `evt_${randomUUID()}` },
       entries: [
         { accountCode: "1000", direction: "debit", assetCode: "USD", amountMinor: "10000" },
@@ -59,7 +59,7 @@ describe("LedgerService.post()", () => {
 
   it("posting the same cause twice is idempotent — one transaction, entries not duplicated", async () => {
     const request: PostingRequest = {
-      kind: "payment_captured",
+      kind: "onramp.capture",
       cause: { type: "fiat_event", id: `evt_${randomUUID()}` },
       entries: [
         { accountCode: "1000", direction: "debit", assetCode: "USD", amountMinor: "500" },
@@ -81,7 +81,7 @@ describe("LedgerService.post()", () => {
   it("creates a per-merchant account on first use and reuses it on the next posting", async () => {
     const merchantId = randomUUID();
     const request = (causeId: string): PostingRequest => ({
-      kind: "on_ramp_completed",
+      kind: "onramp.settled",
       cause: { type: "fiat_event", id: causeId },
       entries: [
         { accountCode: "1100", direction: "debit", assetCode: "USDX", amountMinor: "7000000" },
@@ -101,7 +101,7 @@ describe("LedgerService.post()", () => {
 
   it("rejects an unbalanced posting before ever reaching the database", async () => {
     const request: PostingRequest = {
-      kind: "payment_captured",
+      kind: "onramp.capture",
       cause: { type: "fiat_event", id: `evt_${randomUUID()}` },
       entries: [
         { accountCode: "1000", direction: "debit", assetCode: "USD", amountMinor: "100" },

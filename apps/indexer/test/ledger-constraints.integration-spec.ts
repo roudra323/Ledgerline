@@ -22,7 +22,7 @@ describe("ledger balance constraint trigger", () => {
   async function createTransaction(causeId: string): Promise<string> {
     const result = await dataSource.query<{ id: string }[]>(
       `INSERT INTO ledger_transactions (kind, cause_type, cause_id)
-       VALUES ('payment_captured', 'test', $1)
+       VALUES ('onramp.capture', 'test', $1)
        RETURNING id`,
       [causeId],
     );
@@ -113,7 +113,7 @@ describe("ledger balance constraint trigger", () => {
     try {
       const txResult = (await queryRunner.query(
         `INSERT INTO ledger_transactions (kind, cause_type, cause_id)
-         VALUES ('payment_captured', 'test', $1)
+         VALUES ('onramp.capture', 'test', $1)
          RETURNING id`,
         [`immutable-${Date.now()}-${Math.random()}`],
       )) as { id: string }[];
@@ -216,7 +216,7 @@ describe("ledger balance constraint trigger", () => {
       try {
         const txResult = (await queryRunner.query(
           `INSERT INTO ledger_transactions (kind, cause_type, cause_id)
-           VALUES ('payment_captured', 'test', $1)
+           VALUES ('onramp.capture', 'test', $1)
            RETURNING id`,
           [`app-role-${Date.now()}`],
         )) as { id: string }[];

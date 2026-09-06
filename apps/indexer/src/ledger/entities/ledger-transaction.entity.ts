@@ -13,18 +13,29 @@ import { BaseAuditEntity } from "../../common/entities/base-audit.entity";
 import { LedgerEntry } from "./ledger-entry.entity";
 
 /**
- * All valid business event kinds posted to the double-entry ledger.
- * Must stay in sync with the CHECK constraint in the CreateLedgerTables migration.
+ * All valid business event kinds posted to the double-entry ledger, grouped by the saga that emits
+ * them — see docs/decisions/0016-transaction-kind-vocabulary.md.
+ *
+ * The CHECK constraint in the newest migration that defines it owns this list; this union is a
+ * description of it. `pnpm docs:check` fails the build if the two drift apart, or if a document
+ * posts a kind the constraint would reject.
+ *
+ * Append-only: `kind` is half of `UNIQUE(kind, cause_type, cause_id)`, so renaming one would orphan
+ * the idempotency of every transaction already posted under it.
  */
 export type TransactionKind =
-  | "payment_captured"
-  | "payment_settled"
-  | "payout_requested"
-  | "payout_settled"
-  | "refund_initiated"
-  | "chargeback_received"
-  | "on_ramp_completed"
-  | "rounding_residual";
+  | "onramp.capture"
+  | "onramp.fx"
+  | "onramp.reserve"
+  | "onramp.settled"
+  | "refund.initiated"
+  | "refund.chain_reversed"
+  | "refund.fiat_returned"
+  | "payout.requested"
+  | "payout.burned"
+  | "payout.settled"
+  | "chargeback.received"
+  | "fx.residual";
 
 /**
  * LedgerTransaction Entity — maps the `ledger_transactions` database table.

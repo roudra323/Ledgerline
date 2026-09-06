@@ -26,7 +26,7 @@ describe("LedgerService.post() validation", () => {
   it("rejects a posting with fewer than two entries", async () => {
     const service = buildService();
     const request: PostingRequest = {
-      kind: "payment_captured",
+      kind: "onramp.capture",
       cause: { type: "test", id: "1" },
       entries: [{ ...platformDebitUsd, amountMinor: "100" }],
     };
@@ -37,7 +37,7 @@ describe("LedgerService.post() validation", () => {
   it("rejects a non-positive amount", async () => {
     const service = buildService();
     const request: PostingRequest = {
-      kind: "payment_captured",
+      kind: "onramp.capture",
       cause: { type: "test", id: "2" },
       entries: [
         { ...platformDebitUsd, amountMinor: "0" },
@@ -51,7 +51,7 @@ describe("LedgerService.post() validation", () => {
   it("rejects an unbalanced posting", async () => {
     const service = buildService();
     const request: PostingRequest = {
-      kind: "payment_captured",
+      kind: "onramp.capture",
       cause: { type: "test", id: "3" },
       entries: [
         { ...platformDebitUsd, amountMinor: "100" },
@@ -65,7 +65,7 @@ describe("LedgerService.post() validation", () => {
   it("treats different asset codes as independent balance groups", async () => {
     const service = buildService();
     const request: PostingRequest = {
-      kind: "on_ramp_completed",
+      kind: "onramp.settled",
       cause: { type: "test", id: "4" },
       entries: [
         { ...platformDebitUsd, amountMinor: "1000" },
