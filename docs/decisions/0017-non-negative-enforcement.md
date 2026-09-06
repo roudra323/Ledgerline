@@ -61,6 +61,12 @@ account with float for 10:
 | `FOR UPDATE`                  | 54,834 ms | **1**     | 9 — 49 deadlocks  |
 | `FOR NO KEY UPDATE` (adopted) | 14 ms     | **10**    | 0                 |
 
+Retry does not rescue the middle row, which matters because retry is the standard answer to
+deadlocks and is what the Consequences section below asks of callers. Measured independently: the
+same 20 writers, each retrying up to 300 times with jittered backoff, still finished with **1 of 20
+succeeded after ~6,000 deadlocks and 112 minutes**. A lock mode that conflicts with a lock every
+writer already holds is not a contention problem to be backed off — it is a design error.
+
 The first row is the write-skew this ADR exists to close, reproduced. It needs a commit barrier and
 more than ~20 concurrent writers to surface on one machine — the window between the trigger's `SELECT`
 and its transaction's commit record is small, which is exactly why it would have reached production
