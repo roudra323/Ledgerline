@@ -117,6 +117,41 @@ describe("LedgerService.post()", () => {
     expect(merchantAccounts).toHaveLength(1);
   });
 
+  it("rejects a posting whose leg names an account code in the wrong asset, and creates no row", async () => {
+    // 2000 (merchant_payable) is pinned to USDX in MERCHANT_ACCOUNT_DEFINITIONS. Asking for it in
+    // USD must throw, and — the part a unit test with a mocked repository can't prove — no
+    // ledger_accounts row for this merchant may exist afterwards against the real database.
+    const merchantId = randomUUID();
+    const request: PostingRequest = {
+      kind: "onramp.settled",
+      cause: { type: "fiat_event", id: `evt_${randomUUID()}` },
+      entries: [
+        { accountCode: "1000", direction: "debit", assetCode: "USD", amountMinor: "100" },
+        {
+          accountCode: "2000",
+          direction: "credit",
+          assetCode: "USD",
+          amountMinor: "100",
+          merchantId,
+        },
+      ],
+    };
+
+    await expect(ledger.post(request)).rejects.toThrow(/2000.*USDX.*not USD/i);
+
+    const accounts = await dataSource.query<{ id: string }[]>(
+      `SELECT id FROM ledger_accounts WHERE code = '2000' AND owner_id = $1`,
+      [merchantId],
+    );
+    expect(accounts).toHaveLength(0);
+
+    const transactions = await dataSource.query<{ id: string }[]>(
+      `SELECT id FROM ledger_transactions WHERE cause_id = $1`,
+      [request.cause.id],
+    );
+    expect(transactions).toHaveLength(0);
+  });
+
   it("rejects an unbalanced posting before ever reaching the database", async () => {
     const request: PostingRequest = {
       kind: "onramp.capture",

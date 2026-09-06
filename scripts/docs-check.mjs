@@ -51,6 +51,23 @@ function sectionLines(markdown, headingText) {
   return end === -1 ? rest : rest.slice(0, end);
 }
 
+/**
+ * Ledger kinds named by posting samples in a markdown file.
+ *
+ * Scoped to fenced blocks that are actually postings — one carrying a `cause:` or calling
+ * `ledger.post(` — because `kind:` on its own is ordinary TypeScript and appears in docs describing
+ * unrelated discriminated unions. Quote style is not the discriminator; the surrounding block is.
+ */
+function postingKindsIn(markdown) {
+  const kinds = [];
+  for (const block of markdown.matchAll(/```[\s\S]*?```/g)) {
+    const fenced = block[0];
+    if (!/cause:|ledger\.post\(/.test(fenced)) continue;
+    kinds.push(...captureAll(fenced, /kind:\s*["']([^"']+)["']/g));
+  }
+  return kinds;
+}
+
 /** Four-digit account codes in the first cell of each markdown table row. */
 function accountCodesInTable(lines) {
   const codes = new Set();
@@ -76,11 +93,16 @@ function newestMigrationDefining(pattern) {
 
 // ── 1. Ledger transaction kinds: the CHECK constraint owns them ──────────────────────────────────
 
-const kindMigration = newestMigrationDefining(/kind\s+IN\s*\(/i);
+const KIND_CHECK_PATTERN = /ledger_transactions[\s\S]{0,2000}?kind\s+IN\s*\(/i;
+const kindMigration = newestMigrationDefining(KIND_CHECK_PATTERN);
 if (!kindMigration) {
   fail("kinds", "no migration defines a `kind IN (...)` CHECK", "apps/indexer/src/migrations/");
 } else {
-  const checkList = kindMigration.source.match(/kind\s+IN\s*\(([^)]*)\)/i)[1];
+  // Anchored on the table name for the same reason the search above is: an unrelated `kind IN (...)`
+  // elsewhere in the file must not be mistaken for ledger_transactions' constraint.
+  const checkList = kindMigration.source.match(
+    /ledger_transactions[\s\S]{0,2000}?kind\s+IN\s*\(([^)]*)\)/i,
+  )[1];
   const schemaKinds = new Set(captureAll(checkList, /'([^']+)'/g));
 
   const entity = read("apps/indexer/src/ledger/entities/ledger-transaction.entity.ts");
@@ -106,13 +128,15 @@ if (!kindMigration) {
     }
   }
 
-  // Two shapes carry a ledger kind in the docs: a code sample's `kind: "..."`, and the worked
-  // example's `T<n>  <kind>` posting lines. Deliberately narrow — PSP webhook event types
-  // (`refund.succeeded`, `payout.paid`) look identical and are a different vocabulary entirely.
+  // Two shapes carry a ledger kind in the docs: a posting sample's `kind:`, and the worked example's
+  // `T<n>  <kind>` lines. Deliberately narrow — PSP webhook event types (`refund.succeeded`,
+  // `payout.paid`) look identical and are a different vocabulary, and a bare `kind:` also appears in
+  // unrelated TypeScript (`{ kind: 'live' | 'backfill' }` in conventions.md §3), which is why the
+  // scan below requires the surrounding fenced block to actually be a posting.
   for (const file of readdirSync(join(REPO_ROOT, "docs")).filter((name) => name.endsWith(".md"))) {
     const markdown = read(join("docs", file));
     const documented = [
-      ...captureAll(markdown, /kind:\s*"([^"]+)"/g),
+      ...postingKindsIn(markdown),
       ...captureAll(markdown, /^T\d+ +([a-z_][a-z_.]*)/gm),
     ];
     for (const kind of documented) {

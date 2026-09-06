@@ -112,12 +112,22 @@ in insertion order and that order is the caller's. Postgres detects it and abort
 rollback — never a wrong balance. It fails closed, which is the correct direction for money, but it is
 a new way for a posting to fail and callers must be prepared to retry.
 
-This is now a genuinely rare event rather than the norm (see the lock-mode table above), but the
-structural fix is to give `LedgerService.post()` a **deterministic lock order** — insert a
-transaction's entries ordered by `account_id`, so every posting acquires account locks in the same
-sequence. `sequence` is an explicit column, so ordering the INSERTs does not change what it records.
-Deferred to Block 1.7, which rewrites this trigger anyway; noted here so it is a decision rather than
-an omission.
+**This was first written as "genuinely rare". It is not, and the correction matters.** Measured
+adversarially: 20 postings of `A → B` released simultaneously against 20 of `B → A`, **35 of 40
+(87.5%) deadlocked**. Correctness held throughout — every abort was a clean rollback and the pair's
+balances summed to exactly zero on every run — but availability at that shape collapses.
+
+So the structural fix is no longer deferred. `LedgerService.post()` now **inserts a transaction's
+entries ordered by `account_id`**, giving every posting made through the single writer one global
+lock order, which is the textbook remedy for lock-order deadlocks. `sequence` is an explicit column,
+so what it records is unchanged — only the INSERT order moves, and with it the order the per-row
+trigger takes its locks.
+
+That covers everything going through `post()`, which is the designated single writer. It does **not**
+cover a direct SQL writer choosing its own order — a migration, a `psql` session, a future second
+code path. Those keep the residual risk, and get an abort rather than a wrong balance, which is the
+correct failure. The 87.5% figure above is measured on exactly that raw-SQL path and is the reason
+the ordering rule belongs in `post()` rather than in a comment asking callers to be careful.
 
 **Bad.** `SECURITY DEFINER` means this function runs with the table owner's privileges. That is the
 narrowest way to get the lock, but it is a privilege boundary and it must stay tiny and auditable —
