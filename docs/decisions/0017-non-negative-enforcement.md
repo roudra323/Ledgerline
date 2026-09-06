@@ -45,6 +45,13 @@ read includes the first one's committed entries. The same migration also filters
 `ledger_entries (account_id, asset_code) → ledger_accounts (id, asset_code)`, so the "accounts are
 per-asset" assumption the sum relied on is now enforced rather than assumed.
 
+The function becomes `SECURITY DEFINER`, with `search_path` pinned to `pg_catalog, public`.
+`SELECT ... FOR UPDATE` requires **UPDATE privilege** on the table, and `ledgerline_app` deliberately
+has only `SELECT` and `INSERT` on `ledger_accounts` — the app must never rewrite an account. Running
+the trigger as its owner keeps the lock available without weakening that grant. Pinning `search_path`
+is mandatory for any `SECURITY DEFINER` function: an unqualified name inside one is otherwise
+resolvable against a schema the caller controls.
+
 **Block 1.7 will change what is read, not where the check lives.** Once
 `ledger_account_balances` is a maintained projection, the trigger reads that locked row instead of
 re-deriving from history. That removes the `O(entries per account)` scan this version performs on
@@ -74,6 +81,11 @@ pair of accounts in opposite orders can **deadlock**. Postgres detects it and ab
 rollback — never a wrong balance. It fails closed, which is the correct direction for money, but it is
 a new way for a posting to fail and callers must be prepared to retry. Documented here rather than
 discovered at 3am.
+
+**Bad.** `SECURITY DEFINER` means this function runs with the table owner's privileges. That is the
+narrowest way to get the lock, but it is a privilege boundary and it must stay tiny and auditable —
+it reads two tables and raises. Any future edit to it is a privilege-escalation review, not a routine
+change.
 
 **Bad.** The full-history `SUM` remains until Block 1.7, so the check's cost grows with the ledger.
 Acceptable at current scale, tracked by a `TODO(Block 1.7)`, and the reason 1.7 is the next block.

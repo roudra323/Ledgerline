@@ -17,7 +17,7 @@ import type { MigrationInterface, QueryRunner } from "typeorm";
  *    the sum filters by asset rather than relying on it.
  *
  * See docs/decisions/0017-non-negative-enforcement.md, including why a deadlock here is the correct
- * failure and not a regression.
+ * failure and not a regression, and why the function became SECURITY DEFINER.
  *
  * `CREATE OR REPLACE` on the same function, leaving 1754006400002's CONSTRAINT TRIGGER attachment
  * and 1754006400004 untouched — supersede, never edit.
@@ -106,6 +106,14 @@ const lockingBalanceFunction = `
     RETURN NULL;
   END;
   $$ LANGUAGE plpgsql
+     -- SECURITY DEFINER because the lock below needs UPDATE privilege on ledger_accounts, and
+     -- ledgerline_app deliberately does not have it (1754006400003 grants SELECT + INSERT only —
+     -- the app must never rewrite an account). The constraint is the schema's guarantee, not the
+     -- caller's, so it runs as the table owner rather than weakening the app role's grants.
+     -- search_path is pinned: an unqualified name inside a SECURITY DEFINER function is otherwise
+     -- resolvable against a schema the caller controls.
+     SECURITY DEFINER
+     SET search_path = pg_catalog, public
 `;
 
 /** 1754006400004's function verbatim — the unlocked, asset-blind version this migration replaces. */
