@@ -11,9 +11,8 @@ export default async function globalSetup(): Promise<void> {
   const ownerUrl = requireEnv("DATABASE_URL");
   const databaseName = testDatabaseName();
 
-  // Stashed for teardown: createTestDatabase rewrites the environment to point at the new database.
-  const globalState = globalThis as { __LEDGERLINE_TEST_DB__?: { name: string; ownerUrl: string } };
-  globalState.__LEDGERLINE_TEST_DB__ = { name: databaseName, ownerUrl };
+  // Stashed for teardown via the environment, which is what Jest actually shares between
+  // globalSetup and globalTeardown — createTestDatabase is about to rewrite the connection URLs.
   process.env.LEDGERLINE_TEST_DATABASE = databaseName;
   process.env.LEDGERLINE_TEST_OWNER_URL = ownerUrl;
 

@@ -8,6 +8,11 @@ Prettier, `forge fmt`, and TypeScript `strict` mode — this doc explains the in
 covers the judgment calls tools can't make. When a rule here conflicts with a tool, the tool wins;
 fix the tool config, don't work around it.
 
+**Formatting is owned by the config files, not by this document.** `.prettierrc.json` (quote style,
+indent width, print width), `eslint.config.mjs` (import order and lint rules) and
+`packages/contracts/foundry.toml` (`forge fmt`) are the authorities — per `CLAUDE.md`'s "Where facts
+live", restating their values here would just create a second copy to drift. Run `pnpm format:check`.
+
 ---
 
 ## 1. Guiding principles

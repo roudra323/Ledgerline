@@ -13,6 +13,11 @@ const MIN_LEGS = 2;
  * The single writer of `ledger_transactions`/`ledger_entries` (docs/implementation-guide.md
  * Block 1.6). Every saga and handler posts through this service — nothing else inserts into the
  * ledger tables directly, so every rule (idempotency, balance, immutability) lives in one place.
+ *
+ * TODO(Block 4.4): `post()` cannot yet construct a reversal. Golden rule 3 says corrections are
+ * reversing transactions and `ledger_transactions.reverses_id` exists for them, but `PostingRequest`
+ * has no field for it and the INSERT below never sets it — so today the capability is documented and
+ * absent. Block 4.4 (reorg reversals) is the first caller that needs it; refunds (8.x) follow.
  */
 @Injectable()
 export class LedgerService {

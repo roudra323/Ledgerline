@@ -46,8 +46,8 @@ async function withDeadlockRetry<T>(
 }
 
 /**
- * Proves (or disproves) 1754006400007-LedgerNonNegativeLock.ts: the `FOR UPDATE` lock added to
- * `assert_transaction_balances()` is meant to make concurrent commits touching the same account
+ * Proves (or disproves) 1754006400007-LedgerNonNegativeLock.ts: the `FOR NO KEY UPDATE` lock added
+ * to `assert_transaction_balances()` is meant to make concurrent commits touching the same account
  * serialise, so the non-negative check can no longer miss a concurrent transaction's uncommitted
  * entries (ADR-0017, docs/progress.md Part 1 exit criterion: "20 concurrent payouts against float
  * for 10 -> exactly 10 succeed").
@@ -309,7 +309,7 @@ describe("ledger non-negative lock — concurrency", () => {
   /**
    * The lock must not turn a *permitted* overdraft into spurious failures: an `allows_negative =
    * true` account (fx_clearing) must let every concurrent debit through, serialized or not. This
-   * would catch a regression where the `FOR UPDATE` lock (or a future rewrite of this trigger) adds
+   * would catch a regression where the `FOR NO KEY UPDATE` lock (or a future rewrite of this trigger) adds
    * a rejection path that fires regardless of `allows_negative`.
    */
   it("20 concurrent debits against an allows_negative=true account (fx_clearing) -> all succeed", async () => {

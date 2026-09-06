@@ -7,6 +7,13 @@ import type { TransactionKind } from "./entities/ledger-transaction.entity";
  * Identifies the event that caused a posting. Paired with `kind`, this is the idempotency key —
  * `ledger_transactions.UNIQUE(kind, cause_type, cause_id)` makes posting the same cause twice a
  * no-op instead of a duplicate.
+ *
+ * TODO(Block 5.2): `type` is free text with no `CHECK`, while `kind` — the other half of the same
+ * key — has a bounded union and a constraint that `pnpm docs:check` cross-validates. A half
+ * constrained idempotency key is a duplicate-credit bug waiting for a typo: posting
+ * `"fiat_event"` from one path and `"fiatEvent"` from another defeats the UNIQUE silently and
+ * credits twice. Give it the same treatment once Block 5.2 fixes the set of cause types the two
+ * logs actually emit — before any saga becomes a real caller.
  */
 export interface LedgerCause {
   readonly type: string;

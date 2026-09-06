@@ -261,9 +261,12 @@ account's asset. `createMerchantAccount` was a check-then-insert race.
 
 **Two things worth remembering.** Both existing `convert()` assertions passed against the wrong
 function, because at a 1:1 rate the wrong unit coincidentally equals the right one — a passing test
-proved nothing because it never varied the parameter that mattered. And the `FOR UPDATE` fix failed on
-first run with `permission denied`: `ledgerline_app` has no `UPDATE` grant on `ledger_accounts` by
-design, so the trigger had to become `SECURITY DEFINER`. Neither was findable by reading.
+proved nothing because it never varied the parameter that mattered. And the lock fix was wrong twice before it was
+right: `FOR UPDATE` first failed with `permission denied` (`ledgerline_app` has no `UPDATE` grant on
+`ledger_accounts` by design, so the trigger had to become `SECURITY DEFINER`), and then deadlocked
+49 of 50 concurrent postings, because the composite foreign key added in the same migration takes a
+`KEY SHARE` lock that `FOR UPDATE` conflicts with. `FOR NO KEY UPDATE` is the correct mode. None of
+that was findable by reading — only by running it.
 
 **Blocks 1.4, 1.5 and 1.6 keep their original completion dates above.** They were done as specified;
 the specification and its enforcement were what needed work. The fixes are separate commits.
