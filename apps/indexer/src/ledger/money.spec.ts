@@ -307,16 +307,23 @@ describe("money utilities", () => {
     // --- The new decimals guard, mirroring `assets` table's CHECK (decimals BETWEEN 0 AND 18) ----
 
     describe("decimals guard", () => {
-      it.each([
+      // Typed explicitly: an untyped table widens to (string | number)[], which then needs a cast
+      // at the call site that ESLint flags as redundant while tsc requires it.
+      const invalidDecimals: readonly [string, number, number][] = [
         ["fromDecimals", -1, 6],
         ["fromDecimals", 19, 6],
         ["fromDecimals", 2.5, 6],
         ["toDecimals", 2, -1],
         ["toDecimals", 2, 19],
         ["toDecimals", 2, 2.5],
-      ])("rejects out-of-range or non-integer %s (from=%p, to=%p)", (_label, from, to) => {
-        expect(() => convert("100", from, to, "1", "1")).toThrow();
-      });
+      ];
+
+      it.each(invalidDecimals)(
+        "rejects out-of-range or non-integer %s (from=%p, to=%p)",
+        (_label, from, to) => {
+          expect(() => convert("100", from, to, "1", "1")).toThrow();
+        },
+      );
 
       it("accepts the boundary values 0 and 18 for both decimals", () => {
         expect(() => convert("100", 0, 18, "1", "1")).not.toThrow();

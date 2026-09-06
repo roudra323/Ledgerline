@@ -65,7 +65,9 @@ flowchart LR
     RC --> LD
 ```
 
-See [`docs/architecture.md`](docs/architecture.md) for the full design.
+See [`docs/architecture.md`](docs/architecture.md) for the full design, or
+[`docs/ARCHITECTURE-WALKTHROUGH.md`](docs/ARCHITECTURE-WALKTHROUGH.md) for the same thing taught from
+zero, step by step, with review checkpoints for anyone reading the code for bugs.
 
 ## Design highlights
 
@@ -113,6 +115,7 @@ allocation, on-chain versus off-chain, key management, and the rest.
 
 | Document                                                       | Answers                                                   |
 | -------------------------------------------------------------- | --------------------------------------------------------- |
+| [`docs/ARCHITECTURE-WALKTHROUGH.md`](docs/ARCHITECTURE-WALKTHROUGH.md) | **Start here** — the whole system explained from zero |
 | [`docs/progress.md`](docs/progress.md)                         | **What's done so far** — the tracker                      |
 | [`docs/implementation-guide.md`](docs/implementation-guide.md) | What to build next, in which file, and what depends on it |
 | [`docs/learning-path.md`](docs/learning-path.md)               | Why each piece exists — the concepts, block by block      |
