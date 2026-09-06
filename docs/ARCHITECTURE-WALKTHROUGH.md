@@ -224,13 +224,23 @@ not a global rule.
 >   but O(legs²). A `FOR EACH STATEMENT` constraint trigger would run once — worth checking whether
 >   deferred statement-level triggers give you the `NEW` access this function needs (they don't, which
 >   is likely why it's per-row; but the trade-off should be a conscious one).
-> - The non-negative check in `1754006400004-LedgerNonNegativeCheck.ts:46` does
->   `SUM(...) FROM ledger_entries WHERE account_id = NEW.account_id` — with **no `asset_code` filter
->   and no time bound**. It re-aggregates that account's _entire history_ on every single entry
+> - The non-negative check re-aggregates that account's _entire history_ on every single entry
 >   insert. Two consequences: (a) it gets linearly slower forever, and (b) once
 >   `ledger_account_balances` exists (Block 1.7), there will be two independent ways to compute a
->   balance, which can disagree. Note the missing asset filter is probably harmless today because
->   `ledger_accounts` are per-asset — but that's an invariant held elsewhere, not by this query.
+>   balance, which can disagree. Block 1.7 replaces the scan with a read of the locked projection
+>   row; `1754006400007` carries a `TODO(Block 1.7)` at the spot.
+> - Two things this checkpoint originally listed are now closed by
+>   `1754006400007-LedgerNonNegativeLock.ts`, and how they closed is worth reading. The missing
+>   `asset_code` filter is added, and the "invariant held elsewhere" it relied on is now a real
+>   composite foreign key. More importantly the balance read was **unlocked**, which is textbook
+>   write-skew: two transactions in their commit-time triggers each read a balance excluding the
+>   other's uncommitted rows, both pass, and the account goes negative. Reproduced at 13 of 50
+>   postings against float for 10, final balance −3.
+> - The lock that fixes it is `FOR NO KEY UPDATE`, and the mode is load-bearing. `FOR UPDATE`
+>   conflicts with the `KEY SHARE` lock that same migration's new foreign key takes at INSERT time,
+>   so every concurrent posting holds a lock all the others need: 49 of 50 deadlocked, and retrying
+>   did not help (1 of 20 succeeded after ~6,000 deadlocks). See
+>   [ADR-0017](decisions/0017-non-negative-enforcement.md) for the measured table.
 
 ### 3.4 Money is an integer minor unit of a named asset
 
@@ -897,7 +907,9 @@ to look at it.
 
 ## 13. What is actually built today
 
-**As of 2026-09-06: 16 of 76 blocks. Phase 0 complete, Part 1 (the ledger) at 7 of 9.**
+**As of 2026-09-07: 16 of 76 blocks. Phase 0 complete, Part 1 (the ledger) at 7 of 9.** The
+2026-09-06 audit added no blocks — it fixed and proved what already existed. Test counts: 61 unit,
+12 script, 74 integration.
 
 [`progress.md`](progress.md) owns this count — if the two disagree, it wins. The 2026-09-06 audit
 and the fixes that followed are recorded in
@@ -908,23 +920,25 @@ looking at.
 
 ### Built and tested
 
-| Thing                                                | Where                                                    |
-| ---------------------------------------------------- | -------------------------------------------------------- |
-| App boots, `/health` does a real `SELECT 1`          | `apps/indexer/src/api/health.controller.ts`              |
-| Env validated with zod, crashes at boot              | `apps/indexer/src/config/env.schema.ts`                  |
-| Integer money — `add`/`sub`/`splitFee`/`convert`     | `apps/indexer/src/ledger/money.ts` (property tests pass) |
-| `assets` + chart of accounts (3 assets, 16 accounts) | `migrations/1754006400000-AssetsAndChartOfAccounts.ts`   |
-| Ledger tables + 5 TypeORM entities                   | `migrations/1754006400001-CreateLedgerTables.ts`         |
-| **Deferred balance trigger**                         | `migrations/1754006400002-LedgerBalanceTrigger.ts`       |
-| Immutability trigger + `ledgerline_app` role split   | `migrations/1754006400003-LedgerImmutability.ts`         |
-| **Non-negative check**                               | `migrations/1754006400004-LedgerNonNegativeCheck.ts`     |
-| `LedgerService.post()` — the single writer           | `apps/indexer/src/ledger/ledger.service.ts`              |
-| `AccountRegistryService` — code → UUID               | `apps/indexer/src/ledger/account-registry.service.ts`    |
-| **Account-row lock** on the non-negative check       | `migrations/1754006400007-LedgerNonNegativeLock.ts`      |
-| Entry asset bound to account asset (composite FK)    | same migration                                           |
-| `/metrics` + the first ledger instrument             | `apps/indexer/src/observability/`                        |
-| Integration tests in CI, throwaway DB per run        | `.github/workflows/ci.yml`, `test/global-setup.ts`       |
-| `pnpm docs:check` — docs vs schema                   | `scripts/docs-check.mjs`                                 |
+| Thing                                                                 | Where                                                    |
+| --------------------------------------------------------------------- | -------------------------------------------------------- |
+| App boots, `/health` does a real `SELECT 1`                           | `apps/indexer/src/api/health.controller.ts`              |
+| Env validated with zod, crashes at boot                               | `apps/indexer/src/config/env.schema.ts`                  |
+| Integer money — `add`/`sub`/`splitFee`/`convert`                      | `apps/indexer/src/ledger/money.ts` (property tests pass) |
+| `assets` + chart of accounts (3 assets, 16 accounts)                  | `migrations/1754006400000-AssetsAndChartOfAccounts.ts`   |
+| Ledger tables + 5 TypeORM entities                                    | `migrations/1754006400001-CreateLedgerTables.ts`         |
+| **Deferred balance trigger**                                          | `migrations/1754006400002-LedgerBalanceTrigger.ts`       |
+| Immutability trigger + `ledgerline_app` role split                    | `migrations/1754006400003-LedgerImmutability.ts`         |
+| **Non-negative check**                                                | `migrations/1754006400004-LedgerNonNegativeCheck.ts`     |
+| `LedgerService.post()` — the single writer                            | `apps/indexer/src/ledger/ledger.service.ts`              |
+| `AccountRegistryService` — code → UUID                                | `apps/indexer/src/ledger/account-registry.service.ts`    |
+| **Account-row lock** on the non-negative check                        | `migrations/1754006400007-LedgerNonNegativeLock.ts`      |
+| Entry asset bound to account asset (composite FK)                     | same migration                                           |
+| `/metrics` + the first ledger instrument                              | `apps/indexer/src/observability/`                        |
+| Integration tests in CI, throwaway DB per run                         | `.github/workflows/ci.yml`, `test/global-setup.ts`       |
+| `pnpm docs:check` — docs vs schema                                    | `scripts/docs-check.mjs` (itself tested — 12 cases)      |
+| Deterministic lock ordering in the single writer                      | `ledger.service.ts` — entries INSERTed in account order  |
+| `post()` joins a caller's transaction, and refuses one with none open | `ledger.service.ts`                                      |
 
 ### Not built yet
 
@@ -984,10 +998,19 @@ Full detail, including what each fix changed, is in
    `merchant_payable` debited on the off-ramp at all, when §7's T5 already discharged it at on-ramp
    settlement?
 
-**One more, found by running the tests rather than reading them:** the balance trigger had to become
-`SECURITY DEFINER`, because `SELECT ... FOR UPDATE` needs `UPDATE` privilege and `ledgerline_app`
-deliberately has none on `ledger_accounts`. That is a privilege boundary now — keep the function tiny
-and treat any edit to it as a security review.
+**Three more, none of them findable by reading — only by running the code.**
+
+- The balance trigger had to become `SECURITY DEFINER`: a row lock needs `UPDATE` privilege and
+  `ledgerline_app` deliberately has none on `ledger_accounts`. That is a privilege boundary now —
+  keep the function tiny and treat any edit to it as a security review.
+- The lock mode is `FOR NO KEY UPDATE`, **not** `FOR UPDATE`. The latter conflicts with the
+  `KEY SHARE` lock the new composite foreign key takes at INSERT time, so concurrent postings
+  deadlock by construction — 49 of 50, and retry does not rescue it.
+- The cross-account deadlock an earlier draft of this document called an accepted edge case was
+  measured at **87.5%** (35 of 40 crossed postings). `LedgerService.post()` now inserts entries
+  ordered by `account_id`, giving every posting through the single writer one global lock order: 0 of
+  40 through `post()`, against 33 of 40 for the same shape driven by raw SQL. Direct SQL writers keep
+  the risk and get an abort, never a wrong balance.
 
 ### Questions to carry into every future review
 

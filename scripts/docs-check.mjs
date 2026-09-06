@@ -51,6 +51,17 @@ function sectionLines(markdown, headingText) {
   return end === -1 ? rest : rest.slice(0, end);
 }
 
+/** Every markdown file under docs/, recursively — ADRs and reviews live in subdirectories. */
+function markdownFiles(dir = "docs") {
+  const found = [];
+  for (const entry of readdirSync(join(REPO_ROOT, dir), { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...markdownFiles(path));
+    else if (entry.name.endsWith(".md")) found.push(path);
+  }
+  return found;
+}
+
 /**
  * Ledger kinds named by posting samples in a markdown file.
  *
@@ -133,19 +144,15 @@ if (!kindMigration) {
   // `payout.paid`) look identical and are a different vocabulary, and a bare `kind:` also appears in
   // unrelated TypeScript (`{ kind: 'live' | 'backfill' }` in conventions.md §3), which is why the
   // scan below requires the surrounding fenced block to actually be a posting.
-  for (const file of readdirSync(join(REPO_ROOT, "docs")).filter((name) => name.endsWith(".md"))) {
-    const markdown = read(join("docs", file));
+  for (const file of markdownFiles()) {
+    const markdown = read(file);
     const documented = [
       ...postingKindsIn(markdown),
       ...captureAll(markdown, /^T\d+ +([a-z_][a-z_.]*)/gm),
     ];
     for (const kind of documented) {
       if (!schemaKinds.has(kind)) {
-        fail(
-          "kinds",
-          `docs/${file} posts kind '${kind}', which the CHECK rejects`,
-          kindMigration.name,
-        );
+        fail("kinds", `${file} posts kind '${kind}', which the CHECK rejects`, kindMigration.name);
       }
     }
   }
@@ -181,6 +188,52 @@ if (!accountsMigration) {
       }
     }
   }
+}
+
+// ── 2b. A doc showing the balance trigger's lock must show the lock it actually takes ──────────
+
+// The lock mode is load-bearing — `FOR UPDATE` deadlocks against the composite FK's KEY SHARE lock
+// (ADR-0017) — and two documents claimed the wrong one after it changed. Scoped to fenced SQL that
+// reproduces the trigger's own account read: prose *discussing* `FOR UPDATE`, including ADR-0017's
+// table of rejected alternatives and §9's unrelated nonce lock, is legitimate and untouched.
+const ACCOUNT_LOCK_READ =
+  /FROM\s+ledger_accounts\s+WHERE\s+id\s*=\s*NEW\.account_id\s*([\s\S]{0,60}?);/gi;
+
+const triggerMigration = newestMigrationDefining(
+  /CREATE OR REPLACE FUNCTION assert_transaction_balances/i,
+);
+if (triggerMigration) {
+  const actual = ACCOUNT_LOCK_READ.exec(triggerMigration.source);
+  ACCOUNT_LOCK_READ.lastIndex = 0;
+  const actualLock = actual ? normaliseLock(actual[1]) : null;
+
+  if (!actualLock) {
+    fail(
+      "lock",
+      `could not read the account lock clause from ${triggerMigration.name}`,
+      triggerMigration.name,
+    );
+  } else {
+    for (const file of markdownFiles()) {
+      const markdown = read(file);
+      for (const shown of markdown.matchAll(ACCOUNT_LOCK_READ)) {
+        const documented = normaliseLock(shown[1]);
+        if (documented !== actualLock) {
+          fail(
+            "lock",
+            `${file} shows the balance trigger reading ledger_accounts ${documented || "with no lock"}, but it takes ${actualLock}`,
+            triggerMigration.name,
+          );
+        }
+      }
+    }
+  }
+}
+
+/** The row-lock clause in a SELECT tail, normalised for comparison ("" when there is none). */
+function normaliseLock(selectTail) {
+  const match = /FOR\s+(NO\s+KEY\s+UPDATE|KEY\s+SHARE|UPDATE|SHARE)/i.exec(selectTail);
+  return match ? `FOR ${match[1].replace(/\s+/g, " ").toUpperCase()}` : "";
 }
 
 // ── 3. TODO(Block N.M) markers must name a block that exists ─────────────────────────────────────
