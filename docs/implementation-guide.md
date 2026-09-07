@@ -340,9 +340,25 @@ lookup out of `post()` keeps `post()` about posting.
 2. Insert the `ledger_transactions` header — `ON CONFLICT (kind, cause_type, cause_id) DO NOTHING`
 3. **If the insert conflicted, return early.** Already posted. Not an error — the expected path when
    a webhook is redelivered
-4. Insert the entries
+4. Resolve each leg's account, then insert the entries **ordered by `account_id`**
 5. Update `ledger_account_balances` (Block 1.7)
 6. `COMMIT` — the deferred trigger fires here
+
+**Three things the 2026-09-06 audit added to this shape, each for a reason worth knowing:**
+
+- **Insertion order is account order, not caller order.** The deferred trigger fires once per entry
+  in insertion order and locks that entry's account, so caller order _is_ lock order — and two
+  postings naming the same accounts in opposite orders deadlock, measured at 87.5%. `sequence` still
+  records the caller's order; only the INSERT order moves. See
+  [ADR-0017](decisions/0017-non-negative-enforcement.md).
+- **`post(request, joinTransaction?)`** lets a caller supply its own `QueryRunner`, so a saga
+  transition and its posting commit together. It **refuses** a runner with no open transaction —
+  without that guard every statement autocommits and a failed posting leaves an orphaned header row
+  with no entries. Account resolution runs on the caller's connection too, or a rolled-back posting
+  would leave behind a merchant account it created.
+- **`postedAt`** is optional and defaults to `now()`. A replay must supply the original business
+  time, or Part 4's replay-determinism deep-equal compares rebuilt history against the replay's own
+  clock.
 
 **Why validate in TypeScript when the trigger already does it?** Different failure modes. The
 TypeScript check gives a precise error naming the offending leg while you're developing. The trigger

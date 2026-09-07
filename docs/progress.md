@@ -17,7 +17,9 @@ Part 7   ░░░░░░░░░░░░░░░░░░░░  0/5
 Parts 8–13                     0/20   (optional — see cut list)
 ```
 
-**Next action:** Block 1.7 — Balances projection + row lock
+**Next action:** Block 1.7 — Balances projection. The account row lock already exists
+(`1754006400007`); 1.7 moves the non-negative check onto the locked projection row, which is what
+removes its full-history rescan per insert.
 
 **Minimum shippable point:** end of **Part 7**. Every thing after that is depth.
 
@@ -63,17 +65,17 @@ Complete. The pivot from staking to a payment rail.
 
 _The foundation. Nothing works if this is wrong._
 
-| Block | What                                              | Status | Date       | Commit  | Notes                                                                                                                                                                                                                                                           |
-| ----- | ------------------------------------------------- | ------ | ---------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1.0   | App boots, connects to Postgres                   | ✅     | 2026-08-03 | 2a42ce9 | zod env fails loud at boot; `/health` does a real `SELECT 1`; `incremental:false` fixed a silent stale `dist/`                                                                                                                                                  |
-| 1.1   | `money.ts` — integer money, `splitFee`, `convert` | ✅     | 2026-08-04 |         | integer minor unit math, fee derivation, fast-check property tests passing (1000/1000 runs)                                                                                                                                                                     |
-| 1.2   | Double-entry concept _(no code)_                  | ✅     | 2026-08-05 |         | Debits = Credits mental model, 4 account types                                                                                                                                                                                                                  |
-| 1.3   | Ledger tables + entities                          | ✅     | 2026-08-05 |         | CreateLedgerTables migration + 5 TypeORM entities registered in LedgerModule                                                                                                                                                                                    |
-| 1.4   | Deferred balance trigger                          | ✅     | 2026-08-30 |         | `CONSTRAINT TRIGGER ... DEFERRABLE INITIALLY DEFERRED`; integration test proves COMMIT throws on an unbalanced USD leg. Extended 2026-08-30 (see Log) to also enforce non-negative per `allows_negative`, closing a gap against `docs/architecture.md`/ADR-0004 |
-| 1.5   | Immutability trigger + `reverses_id`              | ✅     | 2026-08-30 |         | `BEFORE UPDATE OR DELETE` trigger on both log tables; least-privilege `ledgerline_app` role split out (owner bypasses REVOKE, so a second role was required for it to mean anything); transaction-level `reverses_id` added                                     |
-| 1.6   | `LedgerService.post()` — the single writer        | ✅     | 2026-08-30 |         | `AccountRegistryService` resolves codes → UUIDs, creates per-merchant accounts on demand; `post()` validates in TS then commits via `ON CONFLICT DO NOTHING`; idempotency and unbalanced-rejection proven by integration test                                   |
-| 1.7   | Balances projection + row lock                    | ☐      |            |         |                                                                                                                                                                                                                                                                 |
-| 1.8   | Trial-balance property test                       | ☐      |            |         |                                                                                                                                                                                                                                                                 |
+| Block | What                                              | Status | Date       | Commit  | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----- | ------------------------------------------------- | ------ | ---------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.0   | App boots, connects to Postgres                   | ✅     | 2026-08-03 | 2a42ce9 | zod env fails loud at boot; `/health` does a real `SELECT 1`; `incremental:false` fixed a silent stale `dist/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 1.1   | `money.ts` — integer money, `splitFee`, `convert` | ✅     | 2026-08-04 |         | integer minor unit math, fee derivation, fast-check property tests passing (1000/1000 runs)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 1.2   | Double-entry concept _(no code)_                  | ✅     | 2026-08-05 |         | Debits = Credits mental model, 4 account types                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 1.3   | Ledger tables + entities                          | ✅     | 2026-08-05 |         | CreateLedgerTables migration + 5 TypeORM entities registered in LedgerModule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 1.4   | Deferred balance trigger                          | ✅     | 2026-08-30 |         | `CONSTRAINT TRIGGER ... DEFERRABLE INITIALLY DEFERRED`; integration test proves COMMIT throws on an unbalanced USD leg. Extended 2026-08-30 (see Log) to also enforce non-negative per `allows_negative`, closing a gap against `docs/architecture.md`/ADR-0004                                                                                                                                                                                                                                                                                                                   |
+| 1.5   | Immutability trigger + `reverses_id`              | ✅     | 2026-08-30 |         | `BEFORE UPDATE OR DELETE` trigger on both log tables; least-privilege `ledgerline_app` role split out (owner bypasses REVOKE, so a second role was required for it to mean anything); transaction-level `reverses_id` added                                                                                                                                                                                                                                                                                                                                                       |
+| 1.6   | `LedgerService.post()` — the single writer        | ✅     | 2026-08-30 |         | `AccountRegistryService` resolves codes → UUIDs, creates per-merchant accounts on demand; `post()` validates in TS then commits via `ON CONFLICT DO NOTHING`; idempotency and unbalanced-rejection proven by integration test. Extended 2026-09-06/07 by the audit (see Log): entries insert in `account_id` order so postings cannot deadlock against each other, `post()` accepts a caller's `QueryRunner` and refuses one with no open transaction, account resolution runs on that same connection, `postedAt` is threaded for replay, and the first ledger metric is emitted |
+| 1.7   | Balances projection + row lock                    | ☐      |            |         |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 1.8   | Trial-balance property test                       | ☐      |            |         |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 **Part 1 exit:** see [`build-plan.md`](build-plan.md), which owns the exit criteria — restating them
 here is how this row and the build plan came to disagree about the third one.
@@ -222,13 +224,13 @@ Re-run before every commit. Update the date when you do.
 
 | Check          | Command                    | Last green                                     |
 | -------------- | -------------------------- | ---------------------------------------------- |
-| Lint           | `pnpm lint`                | 2026-09-06 — now also runs `docs:check`        |
-| Docs vs schema | `pnpm docs:check`          | 2026-09-06 — 5 doc/schema assertions           |
-| Typecheck      | `pnpm typecheck`           | 2026-09-06                                     |
-| Format         | `pnpm format:check`        | 2026-08-03                                     |
+| Lint           | `pnpm lint`                | 2026-09-07 — eslint + `docs:check`             |
+| Docs vs schema | `pnpm docs:check`          | 2026-09-07 — 6 doc/schema assertions           |
+| Typecheck      | `pnpm typecheck`           | 2026-09-07                                     |
+| Format         | `pnpm format:check`        | 2026-09-07                                     |
 | Contracts      | `pnpm contracts:test`      | — _(no tests yet, Part 2)_                     |
-| Unit           | `pnpm test`                | 2026-09-06 — 53 tests                          |
-| Integration    | `pnpm test:integration`    | 2026-09-06 — throwaway DB per run, now in CI   |
+| Unit           | `pnpm test`                | 2026-09-07 — 61 unit + 27 script               |
+| Integration    | `pnpm test:integration`    | 2026-09-07 — 74 tests, throwaway DB, in CI     |
 | Compose        | `docker compose config -q` | 2026-08-01 — _(Docker not running 2026-09-06)_ |
 | Alert rules    | `promtool check rules`     | 2026-08-01 — 25 rules                          |
 
@@ -238,6 +240,35 @@ Re-run before every commit. Update the date when you do.
 
 Newest first. Record anything a future reader would need: decisions taken, things that surprised
 you, blocks cut and why, questions you couldn't answer.
+
+### 2026-09-07 — The audit's own fixes, audited
+
+The 2026-09-06 entry below describes an audit that found four bugs. Handing the rest of the changed
+files to `adversarial-tester` — which should have happened for all fourteen, not two — found four
+more, **three of them in that audit's own fixes**: `post()` was not atomic when handed a
+`QueryRunner` with no open transaction, and `docs:check` had two ways to report "no divergences"
+while checking nothing. `ledger-reviewer` separately found three stale `FOR UPDATE` comments the
+audit itself had introduced.
+
+**The measurement that changed a design decision.** ADR-0017 called the residual cross-account
+deadlock rare. Measured, it was 87.5% — 35 of 40 crossed postings. So the deterministic lock ordering
+the ADR had deferred to Block 1.7 is no longer deferred: `post()` inserts entries ordered by
+`account_id`. Verified independently at 0 of 40 through `post()`, against 33 of 40 for the same shape
+driven by raw SQL.
+
+**`scripts/docs-check.mjs` held five vacuous passes** — more defects per line than anything else
+touched, in the file whose whole purpose is catching defects. Four were invisible to reading and to a
+green run; each surfaced only by mutating an input and confirming the check went red. Its own suite is
+now 27 tests, every one constructing an input that should fail.
+
+**Two process rules changed as a result.** The definition of done now makes the unit of independent
+testing the **changed file**, not the session — "I invoked `adversarial-tester`" is satisfiable by
+invoking it once, which is exactly what happened. And `docs:check` gained a sixth assertion, because
+the walkthrough drifted twice and nothing mechanical caught either.
+
+**A doc-ownership bug found while sweeping.** `build-plan.md` and this tracker disagreed about Part
+1's exit criteria, and the version quoted throughout the audit was this file's — the non-owner.
+`build-plan.md` owns exit criteria, now carries both, and this file links rather than restating.
 
 ### 2026-09-06 — Full-repository audit, and the fixes
 

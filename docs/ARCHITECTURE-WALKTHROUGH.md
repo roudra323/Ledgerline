@@ -909,7 +909,7 @@ to look at it.
 
 **As of 2026-09-07: 16 of 76 blocks. Phase 0 complete, Part 1 (the ledger) at 7 of 9.** The
 2026-09-06 audit added no blocks — it fixed and proved what already existed. Test counts: 61 unit,
-12 script, 74 integration.
+27 script, 74 integration.
 
 [`progress.md`](progress.md) owns this count — if the two disagree, it wins. The 2026-09-06 audit
 and the fixes that followed are recorded in
