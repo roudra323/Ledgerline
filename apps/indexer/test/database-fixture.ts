@@ -54,7 +54,10 @@ export async function createTestDatabase(databaseName: string): Promise<void> {
   }
 }
 
-export async function dropTestDatabase(originalOwnerUrl: string, databaseName: string): Promise<void> {
+export async function dropTestDatabase(
+  originalOwnerUrl: string,
+  databaseName: string,
+): Promise<void> {
   await runOnMaintenance(
     originalOwnerUrl,
     `DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`,

@@ -281,7 +281,9 @@ describe("ledger balance constraint trigger", () => {
       await queryRunner.startTransaction();
 
       try {
-        const transactionId = await createTransaction(`negative-check-${Date.now()}-${Math.random()}`);
+        const transactionId = await createTransaction(
+          `negative-check-${Date.now()}-${Math.random()}`,
+        );
         await queryRunner.query(
           `INSERT INTO ledger_entries (transaction_id, account_id, direction, asset_code, amount_minor, sequence)
            VALUES ($1, $2, 'debit', 'USD', $3, 0)`,

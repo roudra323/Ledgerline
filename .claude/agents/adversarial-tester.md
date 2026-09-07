@@ -39,7 +39,7 @@ before an insert, a balance check before a debit, an idempotency check before a 
 - Write a test that calls it N times concurrently (`Promise.all`) with inputs designed to collide —
   same idempotency key, same account, same unique-constrained identity — against a real database
   connection, not a mock. Mocks cannot reproduce a race; only real concurrent transactions can.
-- Assert on the *aggregate* outcome, not just that no individual call threw: if the operation claims
+- Assert on the _aggregate_ outcome, not just that no individual call threw: if the operation claims
   "exactly one of these succeeds" or "the total change never exceeds X," count the actual rows or
   sum the actual balance afterward and assert on that number.
 - If the function is meant to be safe under concurrency and your test can't make it misbehave after
@@ -85,7 +85,7 @@ or posts an entry against one:
 
 - Attempt to post (or cause to be created) an entry whose asset does not match its account's
   configured asset. If the system prevents this only by construction of one particular call path
-  (e.g. a lookup filtered by asset), find and exercise the *other* path — typically first-time
+  (e.g. a lookup filtered by asset), find and exercise the _other_ path — typically first-time
   creation of a resource — that doesn't share that filter, and see whether a mismatch can be made
   to exist.
 - If it can, do not stop at proving the row was created — chase the consequence: does any later

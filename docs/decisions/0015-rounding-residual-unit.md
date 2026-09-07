@@ -14,16 +14,16 @@ implementation returned the raw remainder of the internal division:
 
 ```ts
 const converted = totalNumerator / totalDenominator;
-const residual  = totalNumerator % totalDenominator;   // unit: ???
+const residual = totalNumerator % totalDenominator; // unit: ???
 ```
 
 The 2026-09-06 audit found that this value's unit **silently changes with the direction of the scale
 change**, because the scale factor lands on a different side of the fraction in each branch:
 
-| Direction                             | `totalDenominator` | Unit of `residual`                          |
-| ------------------------------------- | ------------------ | ------------------------------------------- |
-| Downscale (`toDecimals < fromDecimals`) | `rateDen · 10ⁿ`   | source minor units ÷ `rateDen`              |
-| Upscale (`toDecimals ≥ fromDecimals`)   | `rateDen`         | **target** minor units ÷ `rateDen`          |
+| Direction                               | `totalDenominator` | Unit of `residual`                 |
+| --------------------------------------- | ------------------ | ---------------------------------- |
+| Downscale (`toDecimals < fromDecimals`) | `rateDen · 10ⁿ`    | source minor units ÷ `rateDen`     |
+| Upscale (`toDecimals ≥ fromDecimals`)   | `rateDen`          | **target** minor units ÷ `rateDen` |
 
 At a 1:1 rate the downscale case coincidentally yields exactly the source minor units, which is why
 `money.spec.ts`'s two existing assertions passed against a wrong function for the life of Block 1.1.
@@ -43,8 +43,8 @@ then floor the round trip:
 
 ```ts
 const converted = (amount * rateNumerator) / rateDenominator;
-const consumed  = (converted * rateDenominator) / rateNumerator;
-const residual  = amount - consumed;
+const consumed = (converted * rateDenominator) / rateNumerator;
+const residual = amount - consumed;
 ```
 
 `amount === consumed + residual` holds by construction, `residual ≥ 0` always, and the residual is a
@@ -57,11 +57,11 @@ immutable; this ADR pins the semantics ADR-0001 left open rather than supersedin
 
 ## Alternatives considered
 
-| Alternative                                                         | Why it lost                                                                                                                                                                                                                                                                                        |
-| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Residual in the **target** asset                                    | The dust exists precisely because it is *smaller than one target minor unit*. Expressed in the target asset it is always `0` — the information is destroyed by the representation, which is the bug restated, not fixed.                                                                            |
-| Return `{ amount, residualNumerator, residualDenominator }`         | Honest about the mathematics, and the caller could journal it exactly. But it pushes an unresolved rational into every call site in Parts 6, 8 and 9, and each one would have to make this same decision — badly, eventually, and differently. One function decides once.                            |
-| Round half-up instead of flooring, and journal the signed difference | Makes `residual` sometimes negative, so `3900` would take entries on both sides. Defensible in isolation, but it means the platform sometimes *creates* a minor unit it did not receive. Flooring guarantees the platform never credits more than it took in, which is the conservative direction.  |
+| Alternative                                                          | Why it lost                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Residual in the **target** asset                                     | The dust exists precisely because it is _smaller than one target minor unit_. Expressed in the target asset it is always `0` — the information is destroyed by the representation, which is the bug restated, not fixed.                                                                           |
+| Return `{ amount, residualNumerator, residualDenominator }`          | Honest about the mathematics, and the caller could journal it exactly. But it pushes an unresolved rational into every call site in Parts 6, 8 and 9, and each one would have to make this same decision — badly, eventually, and differently. One function decides once.                          |
+| Round half-up instead of flooring, and journal the signed difference | Makes `residual` sometimes negative, so `3900` would take entries on both sides. Defensible in isolation, but it means the platform sometimes _creates_ a minor unit it did not receive. Flooring guarantees the platform never credits more than it took in, which is the conservative direction. |
 | Drop the dust and log it                                             | Forbidden by ADR-0001 and golden rule 4, and it is the exact mechanism reconciler I3 exists to detect. A log line is not a journal entry.                                                                                                                                                          |
 
 ## Consequences

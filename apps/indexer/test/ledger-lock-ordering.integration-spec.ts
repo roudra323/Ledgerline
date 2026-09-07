@@ -85,11 +85,19 @@ describe("LedgerService.post() — account-id lock ordering (ADR-0017)", () => {
     return String(reason);
   }
 
-  function leg(accountCode: string, merchantId: string, direction: "debit" | "credit", amountMinor: string): PostingLeg {
+  function leg(
+    accountCode: string,
+    merchantId: string,
+    direction: "debit" | "credit",
+    amountMinor: string,
+  ): PostingLeg {
     return { accountCode, merchantId, direction, assetCode: "USDX", amountMinor };
   }
 
-  function request(entries: readonly PostingLeg[], kind: PostingRequest["kind"] = "payout.requested"): PostingRequest {
+  function request(
+    entries: readonly PostingLeg[],
+    kind: PostingRequest["kind"] = "payout.requested",
+  ): PostingRequest {
     return { kind, cause: { type: "test", id: `lock-order-${randomUUID()}` }, entries };
   }
 
@@ -106,24 +114,26 @@ describe("LedgerService.post() — account-id lock ordering (ADR-0017)", () => {
     const attemptsPerDirection = 20;
     const aThenB = Array.from({ length: attemptsPerDirection }, () =>
       ledger.post(
-        request([leg("2000", a.merchantId, "debit", "1"), leg("2000", b.merchantId, "credit", "1")]),
+        request([
+          leg("2000", a.merchantId, "debit", "1"),
+          leg("2000", b.merchantId, "credit", "1"),
+        ]),
       ),
     );
     const bThenA = Array.from({ length: attemptsPerDirection }, () =>
       ledger.post(
-        request([leg("2000", b.merchantId, "debit", "1"), leg("2000", a.merchantId, "credit", "1")]),
+        request([
+          leg("2000", b.merchantId, "debit", "1"),
+          leg("2000", a.merchantId, "credit", "1"),
+        ]),
       ),
     );
 
     const outcomes = await Promise.allSettled([...aThenB, ...bThenA]);
     const fulfilled = outcomes.filter((o) => o.status === "fulfilled");
-    const rejected = outcomes.filter(
-      (o): o is PromiseRejectedResult => o.status === "rejected",
-    );
+    const rejected = outcomes.filter((o): o is PromiseRejectedResult => o.status === "rejected");
     const deadlocked = rejected.filter((o) => /deadlock detected/i.test(reasonMessage(o.reason)));
-    const unexplained = rejected.filter(
-      (o) => !/deadlock detected/i.test(reasonMessage(o.reason)),
-    );
+    const unexplained = rejected.filter((o) => !/deadlock detected/i.test(reasonMessage(o.reason)));
 
     console.info(
       `[post()-crossed-order] attempted: ${outcomes.length}, committed: ${fulfilled.length}, ` +
@@ -254,9 +264,7 @@ describe("LedgerService.post() — account-id lock ordering (ADR-0017)", () => {
     const outcomes = await Promise.allSettled([...forward, ...reverse, ...shuffled]);
     const rejected = outcomes.filter((o): o is PromiseRejectedResult => o.status === "rejected");
     const deadlocked = rejected.filter((o) => /deadlock detected/i.test(reasonMessage(o.reason)));
-    const unexplained = rejected.filter(
-      (o) => !/deadlock detected/i.test(reasonMessage(o.reason)),
-    );
+    const unexplained = rejected.filter((o) => !/deadlock detected/i.test(reasonMessage(o.reason)));
 
     console.info(
       `[post()-three-way-crossed] attempted: ${outcomes.length}, deadlocked: ${deadlocked.length}`,
@@ -304,10 +312,11 @@ describe("LedgerService.post() — account-id lock ordering (ADR-0017)", () => {
       ]),
     );
 
-    const stored = await dataSource.query<{ account_id: string; direction: string; amount_minor: string }[]>(
-      `SELECT account_id, direction, amount_minor FROM ledger_entries WHERE transaction_id = $1`,
-      [result.transactionId],
-    );
+    const stored = await dataSource.query<
+      { account_id: string; direction: string; amount_minor: string }[]
+    >(`SELECT account_id, direction, amount_minor FROM ledger_entries WHERE transaction_id = $1`, [
+      result.transactionId,
+    ]);
     expect(stored).toHaveLength(4);
 
     const aRows = await entryCountAndSum(a.accountId);
@@ -359,9 +368,7 @@ describe("LedgerService.post() — account-id lock ordering (ADR-0017)", () => {
     const outcomes = await Promise.allSettled([...newFirst, ...otherFirst]);
     const rejected = outcomes.filter((o): o is PromiseRejectedResult => o.status === "rejected");
     const deadlocked = rejected.filter((o) => /deadlock detected/i.test(reasonMessage(o.reason)));
-    const unexplained = rejected.filter(
-      (o) => !/deadlock detected/i.test(reasonMessage(o.reason)),
-    );
+    const unexplained = rejected.filter((o) => !/deadlock detected/i.test(reasonMessage(o.reason)));
 
     console.info(
       `[post()-new-merchant-race] attempted: ${outcomes.length}, deadlocked: ${deadlocked.length}`,
@@ -400,7 +407,7 @@ describe("LedgerService.post() — account-id lock ordering (ADR-0017)", () => {
       `SELECT id FROM ledger_accounts ORDER BY id LIMIT 50`,
     );
     const ids = rows.map((r) => r.id);
-    expect(ids.length).toBeGreaterThan (5);
+    expect(ids.length).toBeGreaterThan(5);
 
     const compare = (a: string, b: string): number => (a < b ? -1 : 1);
 

@@ -588,11 +588,7 @@ test("check 1 (kinds) — recursion regression: catches a bad posting kind that 
     },
     (root) => {
       const { status, output } = run(root);
-      assert.equal(
-        status,
-        1,
-        `a bad kind inside docs/decisions/ must be caught; got:\n${output}`,
-      );
+      assert.equal(status, 1, `a bad kind inside docs/decisions/ must be caught; got:\n${output}`);
       assert.match(output, /docs\/decisions\/0099-fake-adr\.md posts kind 'onramp\.not_real'/);
     },
   );
@@ -743,7 +739,11 @@ test("check 2b (lock) — newestMigrationDefining() trusts the FIRST definition 
     },
     (root) => {
       const { status, output } = run(root);
-      assert.equal(status, 0, `up-first ordering must compare against the locked version; got:\n${output}`);
+      assert.equal(
+        status,
+        0,
+        `up-first ordering must compare against the locked version; got:\n${output}`,
+      );
     },
   );
 });

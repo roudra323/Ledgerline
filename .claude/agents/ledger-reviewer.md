@@ -38,14 +38,14 @@ For any code that does "does X exist? if not, create X" or "read a value, decide
 it" against Postgres:
 
 - If it's an insert guarded by a unique constraint, it MUST use `INSERT ... ON CONFLICT ... DO
-  NOTHING/UPDATE` (or equivalent), never a plain `SELECT`/`findOne()` followed by `INSERT`/`save()`.
+NOTHING/UPDATE` (or equivalent), never a plain `SELECT`/`findOne()` followed by `INSERT`/`save()`.
   A check-then-insert without a conflict clause is a race under concurrent callers, full stop,
   regardless of how unlikely the implementer believes concurrency to be for that code path.
 - If it's a read that determines whether a write is legal (a balance check, a limit check, an
   availability check), it MUST either take a row lock (`SELECT ... FOR UPDATE`) on the row(s) it
   read, run under `SERIALIZABLE` with retry-on-conflict, or be re-derived from data that is
   provably visible only to the current transaction (e.g., rows this same transaction itself wrote).
-  If the read touches rows written by *other*, potentially concurrent transactions, and nothing
+  If the read touches rows written by _other_, potentially concurrent transactions, and nothing
   locks or serializes against them, this is write-skew: flag it CRITICAL and give the reviewer's
   exact repro — two concurrent callers, both passing individual checks, combined result violating
   the invariant.
@@ -109,7 +109,7 @@ For every comment that states what a function, column, or migration does (not ju
 
 ## Rule 5 — Every significant design decision needs an ADR, and contradicting an existing doc is a red flag, not a rename
 
-- If the code changes *when* or *how* something is created/allowed relative to what an earlier,
+- If the code changes _when_ or _how_ something is created/allowed relative to what an earlier,
   already-merged migration or doc explicitly states (grep for the topic across `docs/` and prior
   migrations before approving), that is a design decision requiring an ADR per `CLAUDE.md`'s
   Definition of Done — "alternatives considered and why each lost." Its absence is a MAJOR finding,
