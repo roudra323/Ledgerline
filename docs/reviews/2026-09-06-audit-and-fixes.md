@@ -211,6 +211,28 @@ run; each was found only by _mutating_ an input and confirming the check went re
 by reading is a check you have not verified. `scripts/docs-check.spec.mjs` now has 27 tests, every
 one of which constructs an input that should fail and proves it does.
 
+## 3c. A sweep of every remaining document
+
+Asked whether _all_ the docs were current, the honest answer was no. A file-by-file pass against
+`main` found four more:
+
+| Gap                                                                                                                                                                                                                                                                                                                                     | Fix                                                                                                                                            |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/decisions/README.md` — the ADR index listed 0001–0014. Three ADRs had been merged and none appeared, in the file whose only job is indexing them                                                                                                                                                                                  | All three added, with a note that 0015 and 0017 **refine** ADR-0001 and ADR-0004 rather than superseding them                                  |
+| `build-plan.md` and `progress.md` **disagreed about Part 1's exit criteria** — the build plan says "projection == recomputed", the tracker says "20 concurrent payouts against float for 10". `CLAUDE.md`'s table makes `build-plan.md` the owner, so the tracker was the wrong one, and it is the version quoted throughout this audit | The owner gains the concurrency criterion (both belong); the tracker now **links** instead of restating, since restating is how they drifted   |
+| `architecture.md` described `convert()`'s residual without naming its unit — the precise thing ADR-0015 had to pin, in the document that owns the design                                                                                                                                                                                | States the source-asset unit and links the ADR                                                                                                 |
+| `learning-path.md` taught that scaling USD → USDX "is exact", true only at a 1:1 rate, and never said what unit the residual is in. This is the document that teaches the concept, so it was actively teaching the misconception that produced the bug                                                                                  | Rewritten to name the unit, to say why 1:1 hides the error, and to tell the reader to vary the **rate** in property tests, not just the amount |
+
+**Not fixed, deliberately.** ADR-0001 documents the signature as
+`convert(amountMinor, fromAsset, toAsset, …)` while the code takes `fromDecimals`/`toDecimals`. The
+ADR's version is arguably the better design — scale belongs to the asset is ADR-0001's own thesis —
+so the code, not the ADR, is the side that drifted. ADRs are immutable once merged, so this is
+recorded here rather than edited: decide it when `convert()` next has a real caller, and if the ADR
+wins, the change is a superseding ADR plus a signature change, not a quiet edit.
+
+`observability.md` and `runbook.md` needed nothing — they specify a target state and make no claims
+about what is built. `learnings.md` is gitignored scratch material by design.
+
 ## 4. Instructions
 
 - `CLAUDE.md` gained **Where facts live** — one owning file per fact; non-owners link rather than

@@ -131,15 +131,27 @@ usdxAmount` is meaningless — like adding 5 metres to 3 kilograms.
   integers safely), converted to `bigint` only inside the helper functions
 - `splitFee(amount, bps)` → `{ fee, net }` where `fee = floor(amount × bps / 10000)` and
   `net = amount − fee`. Never round both sides — that's how you invent or destroy a cent
-- `convert(amount, from, to, rateNum, rateDen)` → `{ amount, residual }`
+- `convert(amountMinor, fromDecimals, toDecimals, rateNum, rateDen)` → `{ amount, residual }`
 
-**The subtle bit.** Converting $99.00 (2 decimals) to USDX (6 decimals) is exact. Converting _back_
-is not — some fraction gets lost. That leftover is the **residual**, and you must return it, not
-silently drop it. Later, you'll record it in an account called `rounding_residual`. Dropped dust is
-the single most common reason a ledger stops balancing.
+**The subtle bit — and it is subtler than it first looks.** Scaling $99.00 (2 decimals) up to USDX
+(6 decimals) is exact _at a 1:1 rate_. Change the rate to 1/3 and it is not, in either direction:
+some fraction cannot be carried. That leftover is the **residual**, you must return it rather than
+drop it, and you record it in `3900 rounding_residual`. Dropped dust is the single most common reason
+a ledger stops balancing.
 
-**Done when.** A property test passes: for thousands of random amounts and fee rates,
-`fee + net === amount`, exactly, always.
+**The part that is easy to get wrong, and did get wrong here.** It is not enough to return _a_
+leftover — it has to be a leftover **in a named asset**, or you cannot post it. `residual` is an
+amount in the **source** asset's minor units: the part of the input too small to buy another whole
+unit of the target. The original implementation returned the raw remainder of its internal division,
+whose unit silently changed with the direction of the scale change — source units one way, a fraction
+of a _target_ unit the other. At a 1:1 rate those coincide, which is exactly why two passing tests
+did not catch it for the life of this block. See
+[ADR-0015](decisions/0015-rounding-residual-unit.md).
+
+**Done when.** Property tests pass over thousands of random inputs: `fee + net === amount` exactly,
+and `consumed + residual === amountMinor` with the residual never large enough to buy another unit
+of the target. Vary the _rate_ as well as the amount — a test that only ever uses 1:1 proves much
+less than it appears to.
 
 **Can you answer this?** _"Why `numeric(38,0)` in the database rather than `bigint`?"_
 (Hint: a token with 18 decimals.)

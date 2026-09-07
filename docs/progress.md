@@ -75,8 +75,8 @@ _The foundation. Nothing works if this is wrong._
 | 1.7   | Balances projection + row lock                    | ☐      |            |         |                                                                                                                                                                                                                                                                 |
 | 1.8   | Trial-balance property test                       | ☐      |            |         |                                                                                                                                                                                                                                                                 |
 
-**Part 1 exit:** 10k random postings → trial balance exactly 0 · `UPDATE ledger_entries` throws ·
-20 concurrent payouts against float for 10 → exactly 10 succeed.
+**Part 1 exit:** see [`build-plan.md`](build-plan.md), which owns the exit criteria — restating them
+here is how this row and the build plan came to disagree about the third one.
 
 ---
 

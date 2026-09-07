@@ -107,7 +107,10 @@ Arithmetic may only combine amounts of the same `asset_code`.
 Cross-asset movement is **never** a subtraction — it is two balanced transactions joined by an **FX
 clearing pair** (`1800 fx_clearing:USD` / `1810 fx_clearing:USDX`). A single `convert()` helper
 returns `{ amount, residual }` and the residual is **journaled to `3900 rounding_residual`, never
-dropped**. This is what keeps the trial balance at exactly zero forever.
+dropped**. The residual is an amount in the **source** asset's minor units — the part of the input
+too small to buy another whole unit of the target — which is what makes it postable in either scale
+direction ([ADR-0015](decisions/0015-rounding-residual-unit.md)). This is what keeps the trial
+balance at exactly zero forever.
 
 ### 2.4 Typed saga aggregates over a shared transition log ([ADR-0003](decisions/0003-saga-tables.md))
 
