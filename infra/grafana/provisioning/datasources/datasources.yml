@@ -8,7 +8,7 @@ datasources:
     isDefault: true
     jsonData:
       timeInterval: 15s
-      # TODO(Phase 3): exemplarTraceIdDestinations -> Jaeger, so latency spikes link to traces.
+      # TODO(Block 7.3): exemplarTraceIdDestinations -> Jaeger, so latency spikes link to traces.
 
   - name: Jaeger
     type: jaeger

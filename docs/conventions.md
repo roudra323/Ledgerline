@@ -105,8 +105,9 @@ live", restating their values here would just create a second copy to drift. Run
   ```
 - **JSDoc on exported classes/services and any non-trivial public function** — one line on purpose,
   plus `@param`/`@returns` when they aren't self-evident.
-- **Mark future work as `TODO(Phase N):`** so it's greppable against the build plan. No orphan TODOs
-  without context.
+- **Mark future work as `TODO(Block N.M):`**, or `TODO(Part N):` for a stub standing in for a whole
+  part, so it's greppable against [`progress.md`](progress.md). `pnpm docs:check` fails on a block or
+  part that does not exist, and on the retired `TODO(Phase N)` form. No orphan TODOs without context.
 - **Don't comment out code.** Delete it.
 - Keep comments truthful — a stale comment is worse than none. Update them with the code.
 
@@ -174,8 +175,8 @@ money-loss bug.
 - **Never JS `number` for an amount.** Not for display, not "just this once", not for a comparison.
 - **An arithmetic expression may only combine amounts with the same `asset_code`.** Scale belongs to
   the asset (via the `assets` table), never to the row.
-- **Cross-asset movement is never a subtraction.** It is two balanced ledger transactions joined by
-  the FX clearing pair. "Sums to zero" across different units is not an invariant.
+- **Cross-asset movement is never a subtraction.** It is one ledger transaction whose legs balance
+  separately in each asset, joined by the FX clearing pair. "Sums to zero" across different units is not an invariant.
 - **Exactly one function may change scale:** `convert()`, which returns `{ amount, residual }`. The
   residual is **journaled** to `3900 rounding_residual`, never dropped. Dust that is silently
   discarded is the thing that makes a trial balance drift.
@@ -248,7 +249,7 @@ ci, deps, repo`.
 - [ ] Names read like plain English; no abbreviations or magic values.
 - [ ] Functions are small, single-purpose, and use guard clauses.
 - [ ] No `any`, no `!`-assertions, no floating promises, no dead/commented code.
-- [ ] Comments explain _why_; TODOs are `TODO(Phase N):`.
+- [ ] Comments explain _why_; TODOs are `TODO(Block N.M):` or `TODO(Part N):`.
 - [ ] Errors are handled at the right layer with context; nothing swallowed.
 - [ ] New indexer/API paths have a metric (and a span where it tells a story).
 - [ ] Tests cover the behavior; idempotency/replay respected where relevant.

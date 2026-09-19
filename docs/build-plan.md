@@ -9,8 +9,9 @@ crash-safely; a fault-injection harness proves the failure handling rather than 
 neither of. Everything interesting — sagas, compensation, idempotency, reconciliation, irreversibility
 — falls out of that one fact.
 
-Build order within any phase: **make it work → make it correct (tests) → make it observable →
-commit.**
+Build order within any block: the working rhythm in [`CLAUDE.md`](../CLAUDE.md), which owns it —
+make it work, independent tests, independent review, make it observable, update `progress.md`,
+commit.
 
 ---
 
@@ -31,8 +32,9 @@ commit.**
 `fiat_events` and its dispatcher, the double-entry ledger, three saga aggregates, the outbox, the
 chain write path, the compliance gates, the reconcilers.
 
-**Mock PSP (own service)** — HMAC-signed webhooks, deterministic ids, and a **fault-injection API**:
-duplicate, reorder, delay, drop-webhook, fail-capture, wrong-amount, late-return, clock-skew.
+**Mock PSP (own service)** — HMAC-signed webhooks, deterministic ids, and a **fault-injection API**;
+the fault kinds, and the failure mode each one exercises, are listed in
+[`apps/mock-psp/README.md`](../apps/mock-psp/README.md).
 
 **Stripe test-mode adapter** behind the same port, contract-tested against `stripe-mock`.
 
@@ -96,10 +98,20 @@ chain_submitted    --[rcpt:reverted]---------> refunding              (compensat
 chain_submitted    --[timer:submit_timeout]--> manual_review
 chain_confirmed    --[timer:finality]--------> settled                (terminal, happy)
 
-refunding          --[fe:refund.succeeded]---> refunded               ledger: reversal of T1..T4
+refunding          --[fe:refund.succeeded]---> refunded               ledger: reversal of T1, T3, T4 (fee too)
 refunding          --[fe:refund.failed]------> manual_review
-any                --[oe:Blacklisted(dest)]--> frozen   ledger: merchant_payable → frozen_payable
+chain_submitted    --[oe:Blacklisted(dest)]--> frozen             ledger: compliance.frozen
+                      (merchant_payable → frozen_payable; reservation released to token_treasury)
+captured / awaiting_liquidity --[oe:Blacklisted(dest)]--> frozen  ledger: none — T3 has not run,
+                      so nothing is owed yet; the capture stays in unsettled_capture
 ```
+
+Postings are [ADR-0018](decisions/0018-ledger-flow-postings.md)'s. T3 is where the merchant becomes
+owed (`CR 2000 merchant_payable`); T4 draws the reservation from `1100 token_treasury`, so a float
+shortfall is also rejected by the database. Minting is never part of this saga
+([ADR-0013](decisions/0013-treasury-float-model.md)): the treasury is topped up by `treasury.mint`,
+posted by an operator mint command (core) or the automatic rebalance (Phase 13). A blacklist after T5
+has nothing to freeze in the ledger — the tokens are already in the merchant's custody.
 
 ## 2.2 Refund (the reverse saga)
 
@@ -112,15 +124,22 @@ requested              --[cmd:validate]--------> validated
             SUM(existing refunds) + amount <= captured_amount_minor
             now() < capture_time + REFUND_WINDOW
 requested              --[cmd:reject]----------> rejected
-validated              --[cmd:submit_chain]----> chain_refund_submitted
-                          ledger: DR merchant_payable / CR token_in_transit
+validated              --[cmd:submit_chain]----> chain_refund_submitted   ledger: none (a submission is a hint)
 chain_refund_submitted --[oe:PaymentRefunded]--> chain_refund_confirmed
+                          ledger: refund.chain_reversed — DR token_treasury / CR fx_clearing:USDX
 chain_refund_submitted --[rcpt:reverted]-------> manual_review
 chain_refund_confirmed --[cmd:psp_refund]-----> fiat_refund_pending
 fiat_refund_pending    --[fe:refund.succeeded]-> completed
-                          ledger: burn USDX + USD reversal
+                          ledger: refund.fiat_returned — DR fx_clearing:USD + DR merchant_receivable
+                                  (shortfall) / CR psp_receivable
 fiat_refund_pending    --[fe:refund.failed]----> manual_review
 ```
+
+**The platform keeps its fee.** The merchant received only the net, so the tokens reclaimed are
+capped at the payment's remaining on-chain refundable amount, and any USD the reclaim does not cover
+becomes merchant debt in `1300 merchant_receivable` — a full refund always leaves debt equal to the
+fee. Reclaimed tokens return to treasury float; nothing is burned. See
+[ADR-0018](decisions/0018-ledger-flow-postings.md).
 
 **Chain first, then fiat** — [ADR-0008](decisions/0008-compensation-ordering.md). The revert case is
 `manual_review` rather than infinite retry, because the most common cause is _the merchant no longer
@@ -131,26 +150,28 @@ holds the tokens_, which is a business dispute, not a technical retry.
 ```
 requested        --[cmd:validate]-------------> screening_pending
     guards: kyb_status='approved', NOT is_payouts_frozen,
-            ledger_balance(merchant_payable) >= amount, velocity limits OK
+            token.balanceOf(merchant) >= amount (pre-flight hint; the burn enforces it),
+            velocity limits OK
 requested        --[cmd:reject]---------------> rejected
 screening_pending--[cmd:screen_pass]---------> screening_passed
 screening_pending--[cmd:screen_fail]---------> manual_review     (funds HELD, not returned)
-screening_passed --[cmd:submit_burn]---------> burn_submitted
-                    ledger: DR merchant_payable / CR token_in_transit
+screening_passed --[cmd:submit_burn]---------> burn_submitted    ledger: none (tokens are still the merchant's)
 burn_submitted   --[oe:PayoutRequested]------> burn_confirmed
-                    ledger: DR stablecoin_issued / CR token_in_transit   (supply shrinks)
+                    ledger: payout.burned — DR stablecoin_issued (supply shrinks) / CR fx_clearing:USDX
+                            + CR rounding_residual; DR fx_clearing:USD / CR merchant_fiat_payable
 burn_submitted   --[rcpt:reverted(Paused)]---> blocked_paused
 blocked_paused   --[oe:Unpause]--------------> screening_passed          (resume)
 burn_submitted   --[rcpt:reverted(Blacklist)]-> blocked_blacklist
 burn_confirmed   --[cmd:enqueue_fiat]--------> fiat_queued
-                    ledger: FX pair + CR merchant_fiat_payable + CR rounding_residual
+                    ledger: none, or DR merchant_fiat_payable / CR merchant_receivable to net a debt
 fiat_queued      --[cmd:no_float]------------> awaiting_fiat_liquidity
 fiat_queued      --[timer:batch_window]------> batched
 batched          --[cmd:submit_batch]--------> fiat_submitted
 fiat_submitted   --[fe:payout.paid]----------> fiat_settled
+                    ledger: payout.settled — DR merchant_fiat_payable / CR bank_settlement
 fiat_submitted   --[fe:payout.failed]--------> fiat_queued        (retryable)
-fiat_submitted   --[fe:payout.returned]------> returned           (R-code / bounced ACH)
-                    ledger: DR bank_settlement / CR merchant_fiat_payable   (re-owe)
+fiat_settled     --[fe:payout.returned]------> returned           (R-code / bounced ACH)
+                    ledger: payout.returned — DR bank_settlement / CR merchant_fiat_payable (re-owe)
 ```
 
 **`burn_confirmed` is the point of no return.** Everything reversible — screening, limits, float
@@ -176,20 +197,20 @@ is that it never ships.
 | **3 — Chain write path**               | `SignerPort` + both adapters + `SigningPolicyService`; `chain_accounts` / `chain_transactions` / `chain_tx_attempts`; submitter (sign-before-broadcast, simulation, escalation, nonce-hole rule); `ChainTxWatcher`                     | Kill -9 at 5 injected points → exactly one mined tx per intent; nonce-gap test recovers                                                                           |
 | **4 — Indexer re-point**               | Handlers for `PaymentSettled`, `PaymentRefunded`, `PayoutRequested`, `Mint`, `Burn`, `Transfer`, `Blacklisted`, `Pause`; the [ADR-0010](decisions/0010-raw-events-partial-unique.md) index fix; `blacklist_status`; `saga_transitions` | Replay determinism passes on the new projections                                                                                                                  |
 | **5 — Mock PSP + fiat log**            | `mock-psp` with the fault-injection API; `fiat_events`; webhook endpoint; dispatcher with the `DEFER`/`IGNORE`/`ILLEGAL` classifier; outbox                                                                                            | Every injected fault produces the designed state, proven by test                                                                                                  |
-| **6 — On-ramp end-to-end**             | `payment_intents`, idempotency keys, quote/expiry, the full machine, ledger postings, web UI happy path                                                                                                                                | One command: create → capture → settle → merchant balance, with a Jaeger trace spanning both logs                                                                 |
+| **6 — On-ramp end-to-end**             | `payment_intents`, idempotency keys, quote/expiry, the full machine, ledger postings, an operator `treasury.mint` command so the treasury has float, web UI happy path                                                                 | One command: create → capture → settle → merchant balance, with a Jaeger trace spanning both logs                                                                 |
 | **7 — Reconciliation + observability** | All reconcilers (I1–I9), all metrics, 4 new dashboards, all alerts, all runbook entries, loadgen rewritten                                                                                                                             | Inject a fault → the right alert fires → the runbook resolves it. **Record the demo video here**                                                                  |
 | **8 — Refund saga**                    | Refund aggregate, chain-first ordering, partial refunds, the triple overrun guard                                                                                                                                                      | Overrun rejected at all three layers; chargeback-after-payout produces the debt entry                                                                             |
 | **9 — Off-ramp**                       | Payout saga: screening → burn → single fiat payout. Float reservation, parking states                                                                                                                                                  | Payout end-to-end; float exhaustion parks rather than fails                                                                                                       |
 | **10 — Compliance**                    | Three ports, OFAC snapshot loader, mock chain-risk, gates at all three points, `screening_checks`, velocity limits                                                                                                                     | Fail-closed test; a sanctioned address blocks a payout its capture allowed                                                                                        |
 | **11 — Chaos + reorg**                 | Anvil snapshot/revert reorg suite; crash-injection suite; the `RpcDisagreement` cross-check                                                                                                                                            | Reorg within depth self-heals; beyond depth → `manual_review` + alert                                                                                             |
 | **12 — Stripe adapter**                | Real test-mode adapter behind the port; contract tests against `stripe-mock`; manual e2e via the Stripe CLI. **Not in CI**                                                                                                             | The same saga suite passes against both adapters                                                                                                                  |
-| **13 — Stretch**                       | Payout **batching**, float rebalancing, EIP-3009 gasless payer flow in the UI, Loki                                                                                                                                                    | —                                                                                                                                                                 |
+| **13 — Stretch**                       | Payout **batching**, **automatic** float rebalancing (the operator mint is core, Phase 6), EIP-3009 gasless payer flow in the UI, Loki                                                                                                 | —                                                                                                                                                                 |
 
 ## 3.1 Cut order
 
 Cut from the bottom, never the middle:
 
-1. **Phase 13 entirely.** Batching and float rebalancing have the lowest ratio of insight to effort.
+1. **Phase 13 entirely.** Batching and automatic float rebalancing have the lowest ratio of insight to effort. The operator mint stays: without it the on-ramp has no float to settle from (ADR-0013).
    The _design_ in these docs is worth ~90% of the credit of building them.
 2. **Phase 12** down to the port plus a `stripe-mock` contract test, with a written "how the port maps
    to Stripe's API" section.
@@ -239,8 +260,9 @@ The load-bearing tests, in rough order of value:
 12. **`PaymentGatewayPort` contract suite** — one shared suite run against MockPSP and `stripe-mock`.
     This is what proves the port is not a toy, far more cheaply than a full Stripe e2e.
 
-**CI jobs:** `lint` · `typecheck` · `contracts` · `unit` · `integration` (testcontainers: Postgres +
-Anvil) · `docker-build`. The Stripe e2e is a manually-dispatched workflow only — test-mode Stripe in
+**CI jobs:** `lint` (eslint, `docs:check` and `typecheck`) · `contracts` · `unit` · `integration` (a
+GitHub Actions `postgres:17` service and a throwaway database per run; Anvil joins when Part 4's
+indexer tests need it) · `docker-build`. The Stripe e2e is a manually-dispatched workflow only — test-mode Stripe in
 CI means network flakiness, secrets in Actions, webhook tunnelling and rate limits, for signal that is
 90% obtainable from `stripe-mock`.
 
@@ -268,7 +290,7 @@ make chain            # anvil + deploy + write addresses to packages/shared
 make up               # core stack
 make demo             # everything incl. loadgen + mock-psp faults
 make test             # unit + property
-make test-integration # testcontainers: postgres + anvil
+make test-integration # Postgres from docker compose; a throwaway database per run
 
 # drive a payment by hand
 curl -XPOST localhost:3001/payment-intents \

@@ -17,8 +17,11 @@ injection harness that proves the failure handling instead of asserting it.
 
 </div>
 
-> **Status:** 🏗️ Phase 0. Built phase-by-phase per [`docs/build-plan.md`](docs/build-plan.md); each
-> phase ends in a working, committable, demoable state.
+> **Status:** 🏗️ Part 1 (the ledger) in progress — Phase 0 done, the database-enforced double-entry
+> ledger built and tested; contracts, chain writer, fiat rail and sagas are designed but not yet
+> built. [`docs/progress.md`](docs/progress.md) is the source of truth for what exists. Built
+> block-by-block per [`docs/build-plan.md`](docs/build-plan.md); each block ends in a working,
+> committable state. **Much of what this README describes is the design; read it with that in mind.**
 
 ---
 
@@ -89,13 +92,15 @@ zero, step by step, with review checkpoints for anyone reading the code for bugs
 - **Idempotency in depth, ending on-chain.** `settle` reverts `PaymentAlreadySettled`, so a
   crashed-and-restarted submitter _cannot_ double-pay a merchant even if every off-chain guard fails.
 - **Fault injection as a first-class feature.** The mock PSP can be told to duplicate, reorder, delay,
-  drop, or mis-amount any webhook. Every entry in the failure matrix has a test that uses it.
+  drop, or mis-amount any webhook. Every entry in the failure matrix names the test that will use it
+  (the mock PSP and its fault API are Part 5, not yet built).
 
 ## The failure matrix
 
-[`docs/failure-modes.md`](docs/failure-modes.md) enumerates ~50 failure modes across the fiat rail,
+[`docs/failure-modes.md`](docs/failure-modes.md) enumerates 57 failure modes across the fiat rail,
 the chain write path, the ledger and the cross-cutting layer — each with its trigger, detection,
-designed response, and the test that proves it. A sample of what is designed for:
+designed response, and the test that proves it (for the ledger entries, already written; for the
+rest, the test is the spec for a part still to build). A sample of what is designed for:
 
 > Card captured but the chain transaction reverts · webhook arriving before our own commit · refund
 > event before the capture event · chargeback after we already paid out · ACH return three days later
@@ -128,7 +133,7 @@ allocation, on-chain versus off-chain, key management, and the rest.
 | `apps/indexer`       | NestJS — both ingest paths, ledger, sagas, chain writer, compliance, API                       |
 | `apps/mock-psp`      | Fake payment provider with a fault-injection API                                               |
 | `apps/web`           | Next.js demo UI (checkout, merchant balance, lag badge)                                        |
-| `packages/contracts` | Foundry — `StableUSD` + `PaymentProcessor`, unit + invariant tests                             |
+| `packages/contracts` | Foundry — `StableUSD` + `PaymentProcessor` (interface stubs until Part 2)                      |
 | `packages/shared`    | ABIs, shared types, deployed addresses                                                         |
 | `infra`              | docker-compose + Prometheus/Grafana/OTel/Jaeger/Alertmanager + loadgen                         |
 | `docs`               | architecture · failure-modes · decisions/ · conventions · observability · runbook · build-plan |
@@ -166,11 +171,11 @@ one.
 ### On custody
 
 The demo signs with well-known public Anvil test keys, and no amount of architecture changes that.
-What is built is the part that transfers: a `SignerPort` with a policy service enforcing per-key value
-caps, `to` allowlists, **function-selector allowlists**, chain-id pinning and a kill switch, plus a
-full `signing_requests` audit trail. The KMS adapter is written and unit-tested against fixtures — the
-low-`s` normalization and `v` recovery that everyone gets wrong — and deliberately never run in the
-demo. See [ADR-0011](docs/decisions/0011-key-management.md).
+What is designed to be built — Part 3, not yet started — is the part that transfers: a `SignerPort`
+with a policy service enforcing per-key value caps, `to` allowlists, **function-selector
+allowlists**, chain-id pinning and a kill switch, plus a full `signing_requests` audit trail; and a
+KMS adapter unit-tested against fixtures — the low-`s` normalization and `v` recovery that everyone
+gets wrong — and deliberately never run in the demo. See [ADR-0011](docs/decisions/0011-key-management.md).
 
 ## Development
 

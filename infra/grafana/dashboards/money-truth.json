@@ -1,5 +1,5 @@
 {
-  "__comment": "Dashboard 1 - Money Truth. THE README SCREENSHOT. TODO(Phase 7): reserve_coverage_ratio as a large single-stat (must read 1.000), trial_balance_residual_minor per asset (must read 0), the four drift gauges (supply, treasury, psp, merchants_with_drift), platform account balances by account_code, merchant_debt_minor, unknown_outflows_total.",
+  "__comment": "Dashboard 1 - Money Truth. THE README SCREENSHOT. TODO(Block 7.3): reserve_coverage_ratio as a large single-stat (must read 1.000), trial_balance_residual_minor per asset (must read 0), the four drift gauges (supply, treasury, psp, merchants_with_drift), platform account balances by account_code, merchant_debt_minor, unknown_outflows_total.",
   "title": "Ledgerline \u2014 Money Truth",
   "uid": "ledgerline-money-truth",
   "tags": ["ledgerline", "money", "reconciliation"],
@@ -26,7 +26,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "The two numbers that matter: **reserve coverage** and **trial balance residual**. Built in **Phase 7** - see docs/observability.md section 2."
+        "content": "The two numbers that matter: **reserve coverage** and **trial balance residual**. Built in **Part 7** - see docs/observability.md section 2."
       }
     }
   ]

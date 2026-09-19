@@ -16,7 +16,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
-    "abi:gen": "echo 'TODO(Phase 0): generate ABIs from packages/contracts/out into src/abis'"
+    "abi:gen": "echo 'TODO(Block 2.7): generate ABIs from packages/contracts/out into src/abis'"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

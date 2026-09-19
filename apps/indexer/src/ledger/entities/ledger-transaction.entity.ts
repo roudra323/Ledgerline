@@ -34,8 +34,13 @@ export type TransactionKind =
   | "payout.requested"
   | "payout.burned"
   | "payout.settled"
+  | "payout.returned"
   | "chargeback.received"
-  | "fx.residual";
+  | "fx.residual"
+  | "treasury.mint"
+  | "treasury.psp_sweep"
+  | "compliance.frozen"
+  | "reconciliation.adjustment";
 
 /**
  * LedgerTransaction Entity — maps the `ledger_transactions` database table.

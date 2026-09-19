@@ -49,7 +49,7 @@ async function withDeadlockRetry<T>(
  * Proves (or disproves) 1754006400007-LedgerNonNegativeLock.ts: the `FOR NO KEY UPDATE` lock added
  * to `assert_transaction_balances()` is meant to make concurrent commits touching the same account
  * serialise, so the non-negative check can no longer miss a concurrent transaction's uncommitted
- * entries (ADR-0017, docs/progress.md Part 1 exit criterion: "20 concurrent payouts against float
+ * entries (ADR-0017, docs/build-plan.md Part 1 exit criterion: "20 concurrent payouts against float
  * for 10 -> exactly 10 succeed").
  *
  * These tests post raw SQL directly against `ledger_entries`/`ledger_transactions`, the same way

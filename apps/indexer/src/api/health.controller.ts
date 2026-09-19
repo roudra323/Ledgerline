@@ -1,4 +1,4 @@
-import { Controller, Get } from "@nestjs/common";
+import { Controller, Get, Logger } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 import type { DataSource } from "typeorm";
 
@@ -15,6 +15,8 @@ import type { DataSource } from "typeorm";
  */
 @Controller("health")
 export class HealthController {
+  private readonly logger = new Logger(HealthController.name);
+
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
   @Get()
@@ -23,8 +25,11 @@ export class HealthController {
     try {
       await this.dataSource.query("SELECT 1");
       db = "up";
-    } catch {
-      // DB unreachable — health must still return, not throw.
+    } catch (error) {
+      // Health must still return, not throw — but a probe that hides why the database is down
+      // leaves the operator guessing (docs/conventions.md §6: never swallow errors).
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`database health probe failed: ${reason}`);
     }
     return { status: "ok", db };
   }

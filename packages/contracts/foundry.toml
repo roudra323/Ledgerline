@@ -25,4 +25,4 @@ runs = 256
 depth = 32
 fail_on_revert = false
 
-# TODO(Phase 0): add [rpc_endpoints] and [etherscan] if/when deploying to a testnet.
+# TODO(Part 2): add [rpc_endpoints] and [etherscan] if/when deploying to a testnet.

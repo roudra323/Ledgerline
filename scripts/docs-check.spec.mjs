@@ -101,6 +101,10 @@ const DEFAULT_FILES = {
   "apps/dummy.ts": "export {};\n",
   "packages/dummy.ts": "export {};\n",
   "infra/dummy.ts": "export {};\n",
+  // todoBearingFiles() unconditionally yields the root "Makefile" path (it is not optional the way
+  // apps/packages/infra directory contents are) — every real checkout has one, so the fixture must
+  // too, or every test below fails on an unrelated ENOENT rather than the thing it is testing.
+  Makefile: "demo:\n\techo hi\n",
 
   "AGENTS.md": [
     "# pointer",
@@ -775,6 +779,316 @@ test("check 2b (lock) — regression canary: reordering the migration's two func
       assert.match(
         output,
         /shows the balance trigger reading ledger_accounts FOR NO KEY UPDATE, but it takes no lock/,
+      );
+    },
+  );
+});
+
+// ── check 1 (kinds): proseLedgerKindsIn() — SQL-style `kind='x'` literals outside posting samples ──
+
+test("check 1 (kinds) — prose: catches a `kind='x'` literal outside any fenced code block", () => {
+  // This is the exact gap the runbook hit: a kind named in a sentence, not a `kind:` field inside a
+  // ```ts posting sample, was invisible to postingKindsIn() entirely. If proseLedgerKindsIn() regresses
+  // to a no-op, this must go from red back to green.
+  withFixture(
+    {
+      "docs/extra.md": [
+        "# Runbook",
+        "",
+        "If you see a transaction with kind='onramp.not_real', page the on-call.",
+        "",
+      ].join("\n"),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(
+        status,
+        1,
+        `a bare SQL-style kind literal in prose must be caught; got:\n${output}`,
+      );
+      assert.match(output, /posts kind 'onramp\.not_real'/);
+    },
+  );
+});
+
+test("check 1 (kinds) — prose: catches `kind = 'x'` with spaces around the equals sign", () => {
+  withFixture(
+    {
+      "docs/extra.md": "Any row where kind = 'onramp.spaced_out' is a bug.\n",
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 1, `spaced '=' must still match; got:\n${output}`);
+      assert.match(output, /posts kind 'onramp\.spaced_out'/);
+    },
+  );
+});
+
+test("check 1 (kinds) — prose: a double-quoted kind literal is caught too", () => {
+  // Found by adversarial-tester: the first version matched single quotes only, mirroring SQL, so a
+  // bad kind written as kind="x" in prose passed. Prose authors do not reliably follow SQL quoting.
+  withFixture(
+    {
+      "docs/extra.md": 'Any row where kind="onramp.double_quoted_escape" is a bug.\n',
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 1, `a double-quoted bad kind must be flagged; got:\n${output}`);
+      assert.match(output, /onramp\.double_quoted_escape/);
+    },
+  );
+});
+
+test("check 1 (kinds) — prose: a line mentioning 'outbox' is exempt even though it names a bad ledger-shaped kind", () => {
+  // outbox_messages has its own kind vocabulary (chain.gas_refill etc.) — a line describing it must
+  // not be checked against the ledger_transactions CHECK at all.
+  withFixture(
+    {
+      "docs/extra.md": "The outbox row has kind='chain.gas_refill', which is not a ledger kind.\n",
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(
+        status,
+        0,
+        `an outbox-mentioning line must be skipped entirely; got:\n${output}`,
+      );
+    },
+  );
+});
+
+test("check 1 (kinds) — prose: the outbox exemption is case-insensitive ('Outbox', 'OUTBOX')", () => {
+  withFixture(
+    {
+      "docs/extra.md": [
+        "The Outbox row has kind='chain.gas_refill', fine.",
+        "The OUTBOX table also uses kind='chain.another_bad_one', also fine.",
+        "",
+      ].join("\n"),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(
+        status,
+        0,
+        `mixed-case 'Outbox'/'OUTBOX' must still exempt the line; got:\n${output}`,
+      );
+    },
+  );
+});
+
+test("check 1 (kinds) — prose: a fenced SQL block is still scanned line-by-line (not exempted just for being fenced)", () => {
+  // proseLedgerKindsIn() operates on markdown.split("\n") with no fence-tracking at all — unlike
+  // postingKindsIn(), it does not require (or check for) being inside or outside a code fence. A bad
+  // kind inside a fenced SQL example must still be caught; this pins that behavior so a future
+  // "only scan prose outside fences" rewrite doesn't silently start skipping fenced SQL examples.
+  withFixture(
+    {
+      "docs/extra.md": [
+        "# Example query",
+        "",
+        "```sql",
+        "SELECT * FROM ledger_transactions WHERE kind='onramp.fenced_but_still_checked';",
+        "```",
+        "",
+      ].join("\n"),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(
+        status,
+        1,
+        `a fenced SQL block is not exempt from the prose scan; got:\n${output}`,
+      );
+      assert.match(output, /onramp\.fenced_but_still_checked/);
+    },
+  );
+});
+
+test("check 1 (kinds) — prose: a valid kind='x' literal naming a real CHECK kind does not false-positive", () => {
+  // Positive control for proseLedgerKindsIn(): if this regresses to flagging every match regardless
+  // of whether the kind is real, this must go red.
+  withFixture(
+    {
+      "docs/extra.md": "Every row with kind='onramp.capture' is a deposit leg.\n",
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 0, `a real kind named in prose must not be flagged; got:\n${output}`);
+    },
+  );
+});
+
+// ── check 3 (todos): expanded file-type scan (.yml/.yaml/.json/.toml/.sh/Makefile) ─────────────────
+
+test("check 3 (todos) — a repository with no root Makefile is checked normally, not crashed", () => {
+  // Found by adversarial-tester: todoBearingFiles() yielded "Makefile" unconditionally, so a missing
+  // root Makefile — the one hand-named path in the scan — crashed docs:check with an uncaught ENOENT
+  // stack trace instead of running the check. A missing Makefile carries no TODOs, so it is skipped.
+  withFixture(
+    {
+      Makefile: null, // delete the fixture's default Makefile
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.doesNotMatch(
+        output,
+        /ENOENT|Node\.js v\d/,
+        `docs:check must not crash; got:\n${output}`,
+      );
+      assert.equal(status, 0, `the fixture is otherwise consistent; got:\n${output}`);
+    },
+  );
+});
+
+test("check 3 (todos) — scans a .yml file for a dangling TODO(Block N.M)", () => {
+  withFixture(
+    {
+      "infra/prometheus/rules.yml": "# TODO(Block 99.1): tune this alert threshold\n",
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 1, `a .yml file must be scanned; got:\n${output}`);
+      assert.match(output, /infra\/prometheus\/rules\.yml has TODO\(Block 99\.1\)/);
+    },
+  );
+});
+
+test("check 3 (todos) — scans a .yaml file (the other spelling of the same extension)", () => {
+  withFixture(
+    {
+      "infra/grafana/dash.yaml": "# TODO(Block 99.2): fix this panel\n",
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 1, `a .yaml file must be scanned; got:\n${output}`);
+      assert.match(output, /infra\/grafana\/dash\.yaml has TODO\(Block 99\.2\)/);
+    },
+  );
+});
+
+test("check 3 (todos) — scans a .toml file for a retired TODO(Phase N) marker", () => {
+  withFixture(
+    {
+      "packages/contracts/foundry.toml": "# TODO(Phase 3): raise the optimizer runs\n",
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 1, `a .toml file must be scanned; got:\n${output}`);
+      assert.match(output, /packages\/contracts\/foundry\.toml still uses TODO\(Phase 3\)/);
+    },
+  );
+});
+
+test("check 3 (todos) — scans a .sh file for a dangling TODO(Part N)", () => {
+  withFixture(
+    {
+      "infra/loadgen/run.sh": "#!/bin/sh\n# TODO(Part 99): wire up the new generator\n",
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 1, `a .sh file must be scanned; got:\n${output}`);
+      assert.match(output, /infra\/loadgen\/run\.sh has TODO\(Part 99\)/);
+    },
+  );
+});
+
+test("check 3 (todos) — a TODO string embedded inside a .json value is still scanned and caught", () => {
+  // JSON has no comment syntax, so a lingering TODO can only live inside a string value (e.g. a
+  // dashboard panel description). The scan is a dumb regex over file bytes, so this must still match
+  // — proving the .json extension add isn't vacuous (matching the extension list but never actually
+  // finding anything because real .json files never contain the substring in a way the regex sees).
+  withFixture(
+    {
+      "infra/grafana/dashboards/fake.json": JSON.stringify({
+        panels: [{ description: "TODO(Block 99.3): replace this stub panel" }],
+      }),
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 1, `a TODO inside a JSON string value must be caught; got:\n${output}`);
+      assert.match(output, /infra\/grafana\/dashboards\/fake\.json has TODO\(Block 99\.3\)/);
+    },
+  );
+});
+
+test("check 3 (todos) — the root Makefile itself is scanned", () => {
+  withFixture(
+    {
+      Makefile: "demo:\n\t# TODO(Block 99.4): wire the real compose command\n\techo hi\n",
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 1, `the root Makefile must be scanned; got:\n${output}`);
+      assert.match(output, /\[todos\] Makefile has TODO\(Block 99\.4\)/);
+    },
+  );
+});
+
+test("check 3 (todos) — a Makefile nested under apps/packages/infra is also scanned, not just the root one", () => {
+  // TODO_BEARING_FILE matches `^Makefile$` against entry.name during the directory walk, which also
+  // catches a nested Makefile — this is not exclusive to the hand-added root entry.
+  withFixture(
+    {
+      "apps/indexer/Makefile": "run:\n\t# TODO(Block 99.5): local dev shortcut\n\techo hi\n",
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(status, 1, `a nested Makefile must be scanned; got:\n${output}`);
+      assert.match(output, /apps\/indexer\/Makefile has TODO\(Block 99\.5\)/);
+    },
+  );
+});
+
+test("check 3 (todos) — a file merely named similarly to Makefile ('notMakefile') is not scanned", () => {
+  // TODO_BEARING_FILE's Makefile branch is anchored (`^Makefile$`), not a substring test. A file that
+  // merely contains "Makefile" in its name and has no recognised extension must be left alone.
+  withFixture(
+    {
+      "apps/indexer/notMakefile": "# TODO(Phase 9): this must not be seen\n",
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(
+        status,
+        0,
+        `a file named 'notMakefile' is not the Makefile and must not be scanned; got:\n${output}`,
+      );
+    },
+  );
+});
+
+test("check 3 (todos) — a skipped directory's file (node_modules) is never scanned even with a matching extension", () => {
+  withFixture(
+    {
+      "apps/indexer/node_modules/some-pkg/config.yml": "# TODO(Phase 1): vendored, ignore\n",
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(
+        status,
+        0,
+        `node_modules must be skipped regardless of file extension; got:\n${output}`,
+      );
+    },
+  );
+});
+
+test("check 3 (todos) — every named skip directory (dist/lib/out/cache/.next) is honoured, not just node_modules", () => {
+  withFixture(
+    {
+      "apps/web/.next/cache/x.json": '{"note":"TODO(Phase 1): build artifact"}',
+      "apps/web/dist/x.yml": "# TODO(Phase 1): build artifact",
+      "apps/indexer/lib/x.toml": "# TODO(Phase 1): build artifact",
+      "apps/indexer/out/x.sh": "# TODO(Phase 1): build artifact",
+      "packages/contracts/cache/x.json": '{"note":"TODO(Phase 1): build artifact"}',
+    },
+    (root) => {
+      const { status, output } = run(root);
+      assert.equal(
+        status,
+        0,
+        `every one of dist/lib/out/cache/.next must be skipped; got:\n${output}`,
       );
     },
   );

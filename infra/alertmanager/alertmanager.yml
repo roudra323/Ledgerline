@@ -1,4 +1,4 @@
-# Alertmanager routing (Phase 3). Routes all alerts to a demo webhook (Discord/Slack).
+# Alertmanager routing (Block 7.4). Routes all alerts to a demo webhook (Discord/Slack).
 # Set ALERT_WEBHOOK_URL in .env and substitute it here, or use a Slack/Discord receiver.
 global:
   resolve_timeout: 5m
@@ -18,7 +18,7 @@ route:
 receivers:
   - name: demo-webhook
     webhook_configs:
-      # TODO(Phase 3): point at your Discord/Slack incoming webhook (see ALERT_WEBHOOK_URL).
+      # TODO(Block 7.4): point at your Discord/Slack incoming webhook (see ALERT_WEBHOOK_URL).
       - url: "http://host.docker.internal:9094/dummy"
         send_resolved: true
 

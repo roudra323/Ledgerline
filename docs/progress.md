@@ -224,13 +224,13 @@ Re-run before every commit. Update the date when you do.
 
 | Check          | Command                    | Last green                                     |
 | -------------- | -------------------------- | ---------------------------------------------- |
-| Lint           | `pnpm lint`                | 2026-09-07 — eslint + `docs:check`             |
-| Docs vs schema | `pnpm docs:check`          | 2026-09-07 — 6 doc/schema assertions           |
-| Typecheck      | `pnpm typecheck`           | 2026-09-07                                     |
-| Format         | `pnpm format:check`        | 2026-09-07                                     |
+| Lint           | `pnpm lint`                | 2026-09-19 — eslint + `docs:check`             |
+| Docs vs schema | `pnpm docs:check`          | 2026-09-19 — 6 checks, 3 of them doc↔schema    |
+| Typecheck      | `pnpm typecheck`           | 2026-09-19                                     |
+| Format         | `pnpm format:check`        | 2026-09-19                                     |
 | Contracts      | `pnpm contracts:test`      | — _(no tests yet, Part 2)_                     |
-| Unit           | `pnpm test`                | 2026-09-07 — 61 unit + 27 script               |
-| Integration    | `pnpm test:integration`    | 2026-09-07 — 74 tests, throwaway DB, in CI     |
+| Unit           | `pnpm test`                | 2026-09-20 — 71 unit + 45 script               |
+| Integration    | `pnpm test:integration`    | 2026-09-19 — 124 tests, throwaway DB, in CI    |
 | Compose        | `docker compose config -q` | 2026-08-01 — _(Docker not running 2026-09-06)_ |
 | Alert rules    | `promtool check rules`     | 2026-08-01 — 25 rules                          |
 
@@ -240,6 +240,52 @@ Re-run before every commit. Update the date when you do.
 
 Newest first. Record anything a future reader would need: decisions taken, things that surprised
 you, blocks cut and why, questions you couldn't answer.
+
+### 2026-09-20 — `convert()`'s rounding direction, written down and pinned
+
+Asked what happens at a rate like 3/2: the floor on delivery and the ceiling on consumption are one
+sub-unit gap seen from each side, and the platform keeps it. Compared against the standards —
+half-even (unbiased, accounting systems), half-up (EU euro conversion), and the directional
+"round in the protocol's favour" rule of Uniswap V3 and ERC-4626 — the directional rule stays: an
+issuer must never deliver more than it holds backing for, on every conversion, not on average.
+ADR-0015 now records the direction, the bound (under one target minor unit per conversion) and that
+the gap is not journaled; `adversarial-tester` pinned the target side with property tests (no
+counterexample in 2,000 runs per property). The revaluation posting that would move accumulated gaps
+into a named account is deferred to the first non-1:1 rate — walkthrough §14 item 13.
+
+### 2026-09-19 — The documented on-ramp did not post; all three flows corrected
+
+Working through every review checkpoint in `ARCHITECTURE-WALKTHROUGH.md` against the code, the §7
+checkpoint — "balanced does not mean correct" — was taken literally and the worked $100 on-ramp was
+run against the migrated schema. **T5 was rejected at COMMIT**: it debits `2000 merchant_payable`,
+which no earlier posting credited. T3 also credited `2500 stablecoin_issued` per payment, contrary to
+ADR-0013, and the refund and payout postings inherited the model (the audit's deferred payout item
+was a symptom of this). [ADR-0018](decisions/0018-ledger-flow-postings.md) redesigns all three: the
+merchant is owed from T3, T4 draws float from `1100`, minting is its own `treasury.mint` posting,
+the platform keeps its fee on refunds (shortfall → `1300` merchant debt), and the fee is taken
+off-chain only. Five kinds appended (migration `1754006400008`); every posting is executed by
+`ledger-flows.integration-spec.ts`, which `adversarial-tester` wrote from the ADR and the code, not
+the author of the design. An operator mint command joins Block 6.4 — without it the
+on-ramp has no float to settle from — and the automatic rebalance stays in the cut-first Phase 13.
+
+A full sweep of every doc against the code found ~60 more stale statements, now fixed; `docs:check`
+widened to prose SQL-style kind literals (how `runbook.md` named a rejected kind) and to TODO markers in
+config files (thirteen `TODO(Phase N)` had survived there). `adversarial-tester` found two defects
+in that widening — a crash when the root `Makefile` is absent, and double-quoted literals missed —
+both fixed. It also proved the ledger does **not** bind a refund to its payment; ADR-0018 records
+that boundary. Two open questions for Block 4.4 are in the walkthrough's §14.
+
+`ledger-reviewer` then caught what a green run hid: that boundary test **committed** a ~1M USDX
+phantom reclaim into the shared `1100`, and an older test assumed `1100` held under 10k USDX — so the
+suite failed 1 run in 3 depending on file order. The phantom test now proves its point inside a
+rolled-back transaction (`SET CONSTRAINTS ALL IMMEDIATE` runs the deferred trigger), and the older
+test reads the live balance instead of hard-coding an overdraw. The flows spec was then rewritten so
+it commits nothing at all — every scenario runs in a rolled-back transaction and funds its own float,
+and a final test proves zero rows remain; the rewrite exposed scenarios that had only passed on float
+earlier tests left behind. A final independent sweep found 27 more disagreements, now resolved; three
+need a decision and are open items 11–12 in the walkthrough's §14 and the audit addendum. It also
+found that failure mode C7's database layer had no test; `ledger-constraints` now proves the
+trigger rejects cross-asset "balanced" sets. Full gate green three consecutive runs.
 
 ### 2026-09-07 — The audit's own fixes, audited
 

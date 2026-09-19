@@ -2,8 +2,9 @@ import type { MigrationInterface, QueryRunner } from "typeorm";
 
 /**
  * Closes a gap between docs/architecture.md §2.2 / ADR-0004 (which describe THREE enforcement
- * layers in the balance trigger — immutability, balance, and non-negative) and
- * 1754006400002-LedgerBalanceTrigger.ts, which only implemented the first two.
+ * layers — immutability, balance, and non-negative) and the migrations so far: immutability is its
+ * own trigger (1754006400003) and 1754006400002-LedgerBalanceTrigger.ts checked balance only, so
+ * nothing enforced the third.
  *
  * Extends assert_transaction_balances() (CREATE OR REPLACE — same function, same trigger
  * attachment from Block 1.4, no need to touch the CONSTRAINT TRIGGER itself) to also reject any

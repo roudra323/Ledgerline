@@ -115,8 +115,8 @@ const lockingBalanceFunction = `
   END;
   $$ LANGUAGE plpgsql
      -- SECURITY DEFINER because the lock below needs UPDATE privilege on ledger_accounts, and
-     -- ledgerline_app deliberately does not have it (1754006400003 grants SELECT + INSERT only —
-     -- the app must never rewrite an account). The constraint is the schema's guarantee, not the
+     -- ledgerline_app deliberately does not have it (SELECT from 1754006400003, INSERT from
+     -- 1754006400005, nothing more — the app must never rewrite an account). The constraint is the schema's guarantee, not the
      -- caller's, so it runs as the table owner rather than weakening the app role's grants.
      -- search_path is pinned: an unqualified name inside a SECURITY DEFINER function is otherwise
      -- resolvable against a schema the caller controls.

@@ -35,8 +35,10 @@ chargeback.received · fx.residual
 rule for **database identifiers** does not reach it — the same way `cause_type` values (`fiat_event`,
 `raw_event`) are data rather than identifiers.
 
-`pnpm docs:check` now asserts the `CHECK` list, the `TransactionKind` union and every kind literal in
-`docs/` agree. This is the mitigation ADR-0014 promised for exactly this drift, generalised.
+`pnpm docs:check` now asserts the `CHECK` list, the `TransactionKind` union and the kinds `docs/`
+posts all agree — every kind in a posting sample, on a worked example's `T<n>  <kind>` line, or in a
+SQL-style kind literal in prose. A kind mentioned only in backticks in a sentence is not
+checked. This is the mitigation ADR-0014 promised for exactly this drift, generalised.
 
 ## Alternatives considered
 

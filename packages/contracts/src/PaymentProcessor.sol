@@ -30,6 +30,11 @@ pragma solidity 0.8.28;
 ///         Events carry amount + fee + resulting total, so off-chain handlers are self-contained
 ///         and deterministic under replay. Keep it.
 ///
+///         FEE: the platform fee is taken OFF-CHAIN, in USD, by the ledger's onramp.fx posting
+///         (docs/decisions/0018-ledger-flow-postings.md). settle() is called with the merchant's
+///         NET amount and feeBps stays 0; the fee/netAmount event fields remain so the event shape
+///         is stable if that is ever revisited. Charging a fee here as well would take it twice.
+///
 ///         TODO(Part 2) invariant suite (PaymentProcessor.invariants.t.sol):
 ///           - token.balanceOf(address(this)) == 0 after every action  (conduit, never a vault —
 ///             one line that kills a whole class of stuck-funds bugs)

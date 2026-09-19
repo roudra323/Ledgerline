@@ -277,3 +277,53 @@ about what is built. `learnings.md` is gitignored scratch material by design.
 Not run: `forge build` / `forge test` (Part 2 unstarted, the test contracts are empty stubs), and
 `docker compose config` (the Docker daemon was not running on this machine — the Postgres used for
 integration testing was the local `postgresql@17`).
+
+---
+
+## Addendum — 2026-09-19
+
+A second pass, started by working through every review checkpoint in
+`ARCHITECTURE-WALKTHROUGH.md` against the code, found that some of this record's own claims did not
+hold. This addendum corrects them; the sections above are left as written.
+
+**The payout item in §5 was a symptom.** The documented on-ramp itself did not post: run against the
+migrated schema, T5 was rejected at COMMIT because no earlier posting credited `merchant_payable`,
+and T3's per-payment `CR 2500` contradicted ADR-0013. The refund and payout postings inherited the
+same model. All three flows were redesigned together in
+[ADR-0018](../decisions/0018-ledger-flow-postings.md), which needed five new kinds (migration
+`1754006400008`), and every posting is now executed by `ledger-flows.integration-spec.ts`. The §5 row
+"resolve before Part 9" is closed.
+
+**§2: "`TODO(Phase …)` … `docs:check` now rejects it" held only for the file types it scanned.**
+Thirteen markers survived in YAML, JSON, TOML and the `Makefile`. They are retargeted, and the check
+now scans those file types too.
+
+**§3c: "`observability.md` and `runbook.md` needed nothing" was wrong for `runbook.md`.** It named
+`kind='reconciliation.adjustment'`, which the `CHECK` rejected. The kind now exists, and `docs:check`
+reads SQL-style kind literals in prose, which is how that one slipped past both detectors.
+
+**§4 and §6 disagree about `docs:check`.** §4 says it enforces "five doc↔schema agreements"; §6 says
+"6 assertions". It runs six checks — `kinds`, `accounts`, `lock`, `todos`, `scripts`, `ssot` — of
+which the first three compare docs with the schema. "Five" came from the spec file's numbering
+(1, 2, 2b, 3, 4, 5).
+
+**§3 and §6 disagree with `progress.md` about `ledger-reviewer`'s findings** — "two stale lock-mode
+comments" here, "three stale `FOR UPDATE` comments" in the 2026-09-07 Log. The Log entry was written
+later, from the review output; this record's count is the one to distrust.
+
+**Two ADRs written during this audit contained errors,** corrected in place because neither had been
+merged: ADR-0015's code sample floored `consumed` — the double-floor bug §1.1 describes — and
+ADR-0017 stated that insertion order is always the caller's, which stopped being true when `post()`
+began ordering by `account_id`.
+
+**Merged ADRs carry claims this audit did not check.** ADR-0001 says "a lint rule flags `+` on
+anything named `*_minor`"; no such rule exists in `eslint.config.mjs`. ADR-0001 and ADR-0004 call a
+cross-asset conversion "two transactions" — it is one transaction whose legs balance per asset, as
+[ADR-0018](../decisions/0018-ledger-flow-postings.md) records. Merged ADRs are immutable; the lint
+rule is either built or the claim is superseded — before Block 6.4, the first saga that does money
+arithmetic outside `money.ts`.
+
+**§5's "Deliberately not fixed" list is otherwise still accurate,** with two additions recorded in
+`ARCHITECTURE-WALKTHROUGH.md` §14 for Block 4.4: how the app role marks a `raw_events` row orphaned
+when `UPDATE` is revoked on the log tables, and keying a re-settlement's cause so it does not collide
+with the posting its reversal cancelled.

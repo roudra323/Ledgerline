@@ -1,4 +1,4 @@
-// OTel must be first — before Nest/express are imported (Phase 4 fills otel.ts).
+// OTel must be first — before Nest/express are imported (Part 7 fills otel.ts).
 import "./observability/otel";
 
 import { ConfigService } from "@nestjs/config";

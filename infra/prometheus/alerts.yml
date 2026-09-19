@@ -5,7 +5,7 @@
 #   critical — a rail is broken or a saga is stuck. Same shift, not same minute.
 #   warning  — a resource is draining or a queue is backing up. Fix before it becomes critical.
 #
-# TODO(Phase 7): these fire against metrics implemented in Phase 7. Until then they evaluate
+# TODO(Block 7.4): these fire against metrics implemented in Part 7. Until then they evaluate
 # against absent series and stay inactive, which is correct — an alert on a metric that does not
 # exist yet must not fire.
 
@@ -218,7 +218,7 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Treasury token float below minimum"
-          description: "Sagas park in awaiting_liquidity; they are not lost. Check the rebalance job."
+          description: "Sagas park in awaiting_liquidity; they are not lost. Run the operator mint, or check the rebalance job if built."
           runbook: "docs/runbook.md#warnings"
 
   # ---------------------------------------------------------------- indexer & API (inherited)

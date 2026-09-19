@@ -44,7 +44,7 @@ services:
     depends_on:
       anvil:
         condition: service_healthy
-    # TODO(Phase 2): forge install + forge script Deploy.s.sol --broadcast, then write the real
+    # TODO(Block 2.7): forge install + forge script Deploy.s.sol --broadcast, then write the real
     # {chainId, stableUsd, paymentProcessor, deployBlock} to /out/addresses.local.json.
     #
     # Until then this writes a PLACEHOLDER marked `"placeholder": true`. That flag exists because
