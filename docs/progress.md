@@ -229,7 +229,7 @@ Re-run before every commit. Update the date when you do.
 | Typecheck      | `pnpm typecheck`           | 2026-09-19                                     |
 | Format         | `pnpm format:check`        | 2026-09-19                                     |
 | Contracts      | `pnpm contracts:test`      | — _(no tests yet, Part 2)_                     |
-| Unit           | `pnpm test`                | 2026-09-19 — 66 unit + 45 script               |
+| Unit           | `pnpm test`                | 2026-09-20 — 71 unit + 45 script               |
 | Integration    | `pnpm test:integration`    | 2026-09-19 — 124 tests, throwaway DB, in CI    |
 | Compose        | `docker compose config -q` | 2026-08-01 — _(Docker not running 2026-09-06)_ |
 | Alert rules    | `promtool check rules`     | 2026-08-01 — 25 rules                          |
@@ -240,6 +240,18 @@ Re-run before every commit. Update the date when you do.
 
 Newest first. Record anything a future reader would need: decisions taken, things that surprised
 you, blocks cut and why, questions you couldn't answer.
+
+### 2026-09-20 — `convert()`'s rounding direction, written down and pinned
+
+Asked what happens at a rate like 3/2: the floor on delivery and the ceiling on consumption are one
+sub-unit gap seen from each side, and the platform keeps it. Compared against the standards —
+half-even (unbiased, accounting systems), half-up (EU euro conversion), and the directional
+"round in the protocol's favour" rule of Uniswap V3 and ERC-4626 — the directional rule stays: an
+issuer must never deliver more than it holds backing for, on every conversion, not on average.
+ADR-0015 now records the direction, the bound (under one target minor unit per conversion) and that
+the gap is not journaled; `adversarial-tester` pinned the target side with property tests (no
+counterexample in 2,000 runs per property). The revaluation posting that would move accumulated gaps
+into a named account is deferred to the first non-1:1 rate — walkthrough §14 item 13.
 
 ### 2026-09-19 — The documented on-ramp did not post; all three flows corrected
 

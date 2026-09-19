@@ -460,7 +460,10 @@ const consumed = ceilDiv(converted * rateDenominator, rateNumerator);
 The residual is a real amount of a named asset — the source asset — which is what makes it postable
 in either scale direction ([ADR-0015](decisions/0015-rounding-residual-unit.md)). That residual is
 posted to `3900 rounding_residual`. It is never rounded away and never silently
-dropped. **This is what keeps the trial balance at exactly zero forever** rather than at "zero plus a
+dropped. (Whole units only: the part of a conversion worth less than one minor unit of either asset
+cannot be posted at all — [ADR-0015](decisions/0015-rounding-residual-unit.md) says which way it is
+rounded and why, and §14 item 13 where it goes.) **This is what keeps the trial balance at exactly
+zero forever** rather than at "zero plus a
 few cents of accumulated dust", which is the state most homegrown ledgers end up in.
 
 > **🔍 Review checkpoint — closed, and worth reading how.** This checkpoint originally asked what unit
@@ -1039,7 +1042,7 @@ code.
 
 ### Open questions in the code as it stands
 
-Eight were raised here on 2026-09-06 and four more on 2026-09-18/19. Seven are closed; the five that remain are listed
+Eight were raised here on 2026-09-06 and five more on 2026-09-18/20. Seven are closed; the six that remain are listed
 with the block that resolves them. Full detail of the first eight is in
 [`reviews/2026-09-06-audit-and-fixes.md`](reviews/2026-09-06-audit-and-fixes.md).
 
@@ -1095,6 +1098,14 @@ with the block that resolves them. Full detail of the first eight is in
     (`build-plan.md` §2.1), `architecture.md` §5 and §8 here all screen at quote time, before
     authorization — so a sanctioned payer is never charged. ADR-0012 is merged, so if quote time
     wins, record it in a superseding ADR. **Decide it with Block 6.1.**
+13. **Rounding gaps accumulate unjournaled in the FX pair.** `convert()` rounds delivery down and
+    consumption up (ADR-0015), so at a rate that does not divide evenly the platform keeps under one
+    target minor unit per conversion — correct, bounded, and pinned by a property test, but never
+    posted anywhere: it sits in `1800`/`1810`, which then net to zero at the rate only to within the
+    accumulated gaps. Today's only rate (USD → USDX at 1:1) is exact, so the gap is always 0. The
+    first non-1:1 rate needs an FX-revaluation posting that moves whole units of accumulated gap into
+    a named rounding account. **Build it with the first block that introduces a non-1:1 rate — Part
+    9's payout FX at the latest.**
 
 **Three more, none of them findable by reading — only by running the code.**
 

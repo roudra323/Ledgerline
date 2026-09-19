@@ -247,6 +247,145 @@ describe("money utilities", () => {
       });
     });
 
+    // --- Target-side rounding invariants (ADR-0015: round down what is delivered, round up what
+    // is consumed, so the platform never delivers more than the input is worth) ------------------
+
+    describe("target-side rounding invariants (property-based)", () => {
+      // Catches: `converted` computed with a ceiling (or a rate applied backwards), which would
+      // let a conversion deliver MORE target value than the source amount is actually worth —
+      // the platform paying out of its own pocket on every single conversion instead of only
+      // keeping sub-unit dust. Checked as an exact rational inequality in bigint
+      // (converted * rateDenominator <= amountMinor * rateNumerator), never via floats.
+      it("never delivers more value than the input is worth: converted <= exact value(amountMinor)", () => {
+        fc.assert(
+          fc.property(
+            fc.bigInt({ min: 0n, max: 10n ** 30n }),
+            fc.integer({ min: 0, max: 18 }),
+            fc.integer({ min: 0, max: 18 }),
+            fc.bigInt({ min: 1n, max: 10n ** 12n }),
+            fc.bigInt({ min: 1n, max: 10n ** 12n }),
+            (amount, fromDecimals, toDecimals, rateNum, rateDen) => {
+              const { amount: converted } = convert(
+                amount.toString(),
+                fromDecimals,
+                toDecimals,
+                rateNum.toString(),
+                rateDen.toString(),
+              );
+
+              // Fold the scale change into the rate exactly as convert() does, derived
+              // independently here rather than reaching into convert()'s internals.
+              const scaleDiff = toDecimals - fromDecimals;
+              const scaleFactor = 10n ** BigInt(Math.abs(scaleDiff));
+              const rateNumerator = scaleDiff >= 0 ? rateNum * scaleFactor : rateNum;
+              const rateDenominator = scaleDiff >= 0 ? rateDen : rateDen * scaleFactor;
+
+              return BigInt(converted) * rateDenominator <= amount * rateNumerator;
+            },
+          ),
+          { numRuns: 2000 },
+        );
+      });
+
+      // Catches: a `converted` that floors so aggressively (or a rate/scale fold error) that it
+      // discards a whole extra target unit or more instead of at most a sub-unit sliver — i.e. the
+      // platform keeping more than the "under one target minor unit" ADR-0015 promises.
+      it("keeps less than one target minor unit of value per conversion: exact value(amountMinor) - converted < 1", () => {
+        fc.assert(
+          fc.property(
+            fc.bigInt({ min: 0n, max: 10n ** 30n }),
+            fc.integer({ min: 0, max: 18 }),
+            fc.integer({ min: 0, max: 18 }),
+            fc.bigInt({ min: 1n, max: 10n ** 12n }),
+            fc.bigInt({ min: 1n, max: 10n ** 12n }),
+            (amount, fromDecimals, toDecimals, rateNum, rateDen) => {
+              const { amount: converted } = convert(
+                amount.toString(),
+                fromDecimals,
+                toDecimals,
+                rateNum.toString(),
+                rateDen.toString(),
+              );
+
+              const scaleDiff = toDecimals - fromDecimals;
+              const scaleFactor = 10n ** BigInt(Math.abs(scaleDiff));
+              const rateNumerator = scaleDiff >= 0 ? rateNum * scaleFactor : rateNum;
+              const rateDenominator = scaleDiff >= 0 ? rateDen : rateDen * scaleFactor;
+
+              // exact value(amountMinor) - converted < 1  <=>  amount*rateNumerator -
+              // converted*rateDenominator < rateDenominator (scaling the inequality by
+              // rateDenominator, which is always positive, to stay in exact bigint arithmetic).
+              const gapScaled = amount * rateNumerator - BigInt(converted) * rateDenominator;
+
+              return gapScaled >= 0n && gapScaled < rateDenominator;
+            },
+          ),
+          { numRuns: 2000 },
+        );
+      });
+
+      // Same "under one target unit" bound, but measured on what the platform actually recorded
+      // as consumed (amountMinor - residual) rather than on the raw input amount. Catches: a
+      // `consumed`/`residual` split that conserves `amountMinor` (Category-1's own invariant) but
+      // does so by attributing an implausible amount of value to the consumed portion — e.g. a
+      // `consumed` that is off by a full source unit in a way the source-side conservation check
+      // alone cannot see because residual absorbs the error and still sums correctly.
+      it("0 <= exact value(consumed) - converted < 1 target unit, where consumed = amountMinor - residual", () => {
+        fc.assert(
+          fc.property(
+            fc.bigInt({ min: 0n, max: 10n ** 30n }),
+            fc.integer({ min: 0, max: 18 }),
+            fc.integer({ min: 0, max: 18 }),
+            fc.bigInt({ min: 1n, max: 10n ** 12n }),
+            fc.bigInt({ min: 1n, max: 10n ** 12n }),
+            (amount, fromDecimals, toDecimals, rateNum, rateDen) => {
+              const { amount: converted, residual } = convert(
+                amount.toString(),
+                fromDecimals,
+                toDecimals,
+                rateNum.toString(),
+                rateDen.toString(),
+              );
+
+              const scaleDiff = toDecimals - fromDecimals;
+              const scaleFactor = 10n ** BigInt(Math.abs(scaleDiff));
+              const rateNumerator = scaleDiff >= 0 ? rateNum * scaleFactor : rateNum;
+              const rateDenominator = scaleDiff >= 0 ? rateDen : rateDen * scaleFactor;
+
+              const consumed = amount - BigInt(residual);
+
+              // exact value(consumed) - converted < 1  <=>  consumed*rateNumerator -
+              // converted*rateDenominator < rateDenominator.
+              const gapScaled = consumed * rateNumerator - BigInt(converted) * rateDenominator;
+
+              return gapScaled >= 0n && gapScaled < rateDenominator;
+            },
+          ),
+          { numRuns: 2000 },
+        );
+      });
+
+      // A concrete, hand-verified non-1:1 example documenting the rule in numbers (ADR-0015): at
+      // rate 3/2 and equal decimals, 1 source unit buys exactly 1 target unit and the leftover
+      // 0.5 target unit of value is kept by the platform rather than journaled or delivered.
+      it("rate 3/2 at equal decimals: amount 1 -> converted 1, residual 0 (the 0.5 target unit is kept by the platform)", () => {
+        const { amount, residual } = convert("1", 2, 2, "3", "2");
+        // converted = floor(1*3/2) = 1; consumed = ceilDiv(1*2, 3) = ceilDiv(2,3) = 1; residual = 0.
+        expect(amount).toBe("1");
+        expect(residual).toBe("0");
+      });
+
+      // Same rate (3/2), a larger amount that divides the rate evenly: documents that when the
+      // rate divides evenly into the amount, the platform keeps nothing at all.
+      it("rate 3/2 at equal decimals: amount 101 -> converted 151, residual 0", () => {
+        const { amount, residual } = convert("101", 2, 2, "3", "2");
+        // converted = floor(101*3/2) = floor(151.5) = 151; consumed = ceilDiv(151*2, 3) =
+        // ceilDiv(302, 3) = 101 (302/3 = 100.67); residual = 101 - 101 = 0.
+        expect(amount).toBe("151");
+        expect(residual).toBe("0");
+      });
+    });
+
     // --- Regression tests for the pre-2026-09-06 unit-confusion bug ------------------------------
 
     it("REGRESSION (upscale): residual is in SOURCE minor units, not the old target-fraction unit that would break Σdebits=Σcredits", () => {

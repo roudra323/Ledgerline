@@ -111,7 +111,9 @@ returns `{ amount, residual }` and the residual is **journaled to `3900 rounding
 dropped**. The residual is an amount in the **source** asset's minor units — the part of the input
 too small to buy another whole unit of the target — which is what makes it postable in either scale
 direction ([ADR-0015](decisions/0015-rounding-residual-unit.md)). This is what keeps the trial
-balance at exactly zero forever.
+balance at exactly zero forever. Rounding is directional — delivery down, consumption up — so the
+platform never delivers more than an input backs; the sub-unit value that rounding keeps cannot be
+posted and stays in the FX pair (ADR-0015).
 
 ### 2.4 Typed saga aggregates over a shared transition log ([ADR-0003](decisions/0003-saga-tables.md))
 
