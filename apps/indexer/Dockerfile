@@ -20,8 +20,14 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 FROM deps AS build
 COPY . .
 RUN pnpm --filter @ledgerline/indexer... build
+# --legacy: pnpm 10 refuses to deploy a package with workspace dependencies unless the whole repo
+# sets inject-workspace-packages=true, which would change how every workspace links
+# @ledgerline/shared in development. The indexer only imports types from it (erased at compile
+# time), so the pre-v10 deploy behaviour is all this image needs.
+# TODO(Block 2.7): the first runtime import from @ledgerline/shared (the generated ABIs) breaks this
+# image — the package's `main` is src/index.ts, which Node cannot run. Build shared to JS first.
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm --filter @ledgerline/indexer deploy --prod /app
+    pnpm --filter @ledgerline/indexer deploy --prod --legacy /app
 
 # ── Runtime (slim, non-root) ─────────────────────────────────
 FROM node:22-slim AS runtime

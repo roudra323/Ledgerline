@@ -241,6 +241,17 @@ Re-run before every commit. Update the date when you do.
 Newest first. Record anything a future reader would need: decisions taken, things that surprised
 you, blocks cut and why, questions you couldn't answer.
 
+### 2026-09-20 — The indexer image had not built since pnpm 10
+
+The first CI run after the audit failed only at `docker-build`: pnpm 10's `deploy` refuses a package
+with workspace dependencies unless the whole repo sets `inject-workspace-packages=true`. The
+Dockerfile predates the pin to pnpm 10 and CI had not run since, so it went unnoticed. Fixed with
+`--legacy` on the one `deploy` line rather than changing how every workspace links
+`@ledgerline/shared` in development — the indexer only imports types from it. Verified by running
+the image: it fails loud on missing config, runs as `node`, carries no dev tooling, and against the
+dev database serves `/health` → `{"status":"ok","db":"up"}`. A `TODO(Block 2.7)` marks the next trap:
+`shared`'s `main` is TypeScript, so its first runtime import will break the image.
+
 ### 2026-09-20 — CI runs only what is built
 
 `ci.yml` now runs only jobs for completed work. The `contracts` job is commented out until Block 2.1
