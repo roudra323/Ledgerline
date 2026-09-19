@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 /// @title Deploy — deterministic local deployment for the demo stack.
-/// @dev TODO(Phase 2):
+/// @dev TODO(Part 2):
 ///        - vm.startBroadcast()
 ///        - deploy StableUSD (6 decimals, symbol USDX)
 ///        - deploy PaymentProcessor(stableUsd)

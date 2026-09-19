@@ -13,8 +13,8 @@ async function bootstrap(): Promise<void> {
   // Enable graceful shutdown
   app.enableShutdownHooks();
 
-  // TODO(Phase 4): app.useLogger(app.get(Logger)) for nestjs-pino with trace_id injection.
-  // TODO(Phase 3): global metrics interceptor (RED method) is registered via ObservabilityModule.
+  // TODO(Part 7): app.useLogger(app.get(Logger)) for nestjs-pino with trace_id injection.
+  // TODO(Part 7): global metrics interceptor (RED method) is registered via ObservabilityModule.
 
   const configService = app.get(ConfigService<Env, true>);
   const port = configService.get("INDEXER_PORT", { infer: true });

@@ -6,6 +6,7 @@ import { HealthController } from "./api/health.controller";
 import { ConfigModule } from "./config/config.module";
 import { appDataSourceOptions } from "./data-source";
 import { LedgerModule } from "./ledger/ledger.module";
+import { ObservabilityModule } from "./observability/observability.module";
 
 /**
  * Root module.
@@ -25,7 +26,7 @@ import { LedgerModule } from "./ledger/ledger.module";
  *   ApiModule                        read endpoints (projections only)  (Phase 6)
  *   AdminModule                      replay, reconciliation, operator commands
  *
- * TODO(Phase 1): the boot sequence must FAIL LOUD on: missing/invalid config, a duplicate or
+ * TODO(Part 4): the boot sequence must FAIL LOUD on: missing/invalid config, a duplicate or
  * unknown event handler, a `placeholder: true` addresses file, and a chain_fingerprint mismatch
  * (failure mode B6). Config errors crash at startup; only runtime per-event errors isolate.
  */
@@ -34,6 +35,7 @@ import { LedgerModule } from "./ledger/ledger.module";
     ConfigModule,
     TypeOrmModule.forRoot(appDataSourceOptions),
     ScheduleModule.forRoot(),
+    ObservabilityModule,
     LedgerModule,
   ],
   controllers: [HealthController],

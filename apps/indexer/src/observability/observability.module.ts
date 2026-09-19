@@ -1,18 +1,31 @@
 import { Module } from "@nestjs/common";
+import { PrometheusModule, makeCounterProvider } from "@willsoto/nestjs-prometheus";
+
+import { LEDGER_ENTRIES_WRITTEN, MetricsService } from "./metrics.service";
 
 /**
- * ObservabilityModule — metrics + logging wiring.
+ * ObservabilityModule — metrics and logging wiring.
  *
- * TODO(Phase 3):
- *   - PrometheusModule.register() from @willsoto/nestjs-prometheus (exposes GET /metrics).
- *   - MetricsService providing the ledgerline_* instruments (see metrics.service.ts).
- *   - a global HTTP interceptor implementing the RED method (http_requests_total,
- *     http_request_duration_seconds, in-flight gauge) so every route is covered automatically.
- * TODO(Phase 4): LoggerModule.forRoot (nestjs-pino) with trace_id/span_id injection.
+ * `PrometheusModule.register()` exposes `GET /metrics`. Registered now, with a single instrument,
+ * rather than in Part 7 with all of them: until this module was wired, "every new path gets a
+ * metric" was unenforceable rather than merely unenforced, so the definition of done was quietly
+ * unsatisfiable for every block.
+ *
+ * TODO(Part 7): the rest of docs/observability.md §1's instruments, and a global HTTP interceptor
+ *   implementing the RED method so every route is covered without being remembered.
+ * TODO(Part 7): LoggerModule.forRoot (nestjs-pino) with trace_id/span_id injection, closing the
+ *   logs <-> traces correlation loop.
  */
 @Module({
-  imports: [],
-  providers: [],
-  exports: [],
+  imports: [PrometheusModule.register()],
+  providers: [
+    makeCounterProvider({
+      name: LEDGER_ENTRIES_WRITTEN,
+      help: "Ledger entry rows written, by the transaction kind that caused them",
+      labelNames: ["kind"],
+    }),
+    MetricsService,
+  ],
+  exports: [MetricsService],
 })
 export class ObservabilityModule {}

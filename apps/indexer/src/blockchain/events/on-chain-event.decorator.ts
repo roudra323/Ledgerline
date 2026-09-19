@@ -13,7 +13,7 @@ export interface OnChainEventMeta {
  * boot via Nest DiscoveryService and validates loudly: a duplicate handler, or a handler for an
  * event not in the registry, CRASHES STARTUP. Config errors fail at boot; runtime errors isolate.
  *
- * TODO(Phase 4): EventRegistry consumes this metadata.
+ * TODO(Part 4): EventRegistry consumes this metadata.
  */
 export function OnChainEvent(meta: OnChainEventMeta): ClassDecorator {
   return (target) => {

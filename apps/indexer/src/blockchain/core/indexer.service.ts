@@ -8,8 +8,8 @@
  *   4. empty ranges still advance the cursor.
  *   5. never read past (head - CONFIRMATIONS).
  *
- * TODO(Phase 1): implement runChunk + dispatch to handlers via EventRegistry.
- * TODO(Phase 2): adaptive chunking, reorg guard hook, per-event failure isolation.
+ * TODO(Part 4): implement runChunk + dispatch to handlers via EventRegistry.
+ * TODO(Part 4): adaptive chunking, reorg guard hook, per-event failure isolation.
  *
  * Scheduler: a @nestjs/schedule 5s tick calls runChunk with a per-syncKey in-process mutex
  * so ticks never overlap for the same key.

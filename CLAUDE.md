@@ -9,9 +9,35 @@ A **bidirectional fiat ⇄ stablecoin payment rail**. Customers pay fiat; mercha
 non-custodially in a stablecoin we issue; merchants can cash out back to fiat.
 
 Two append-only logs — `fiat_events` (off-chain) and `raw_events` (on-chain) — feed one double-entry
-ledger. Every balance is a projection. See `docs/architecture.md` for the design,
-`docs/failure-modes.md` for the edge-case matrix, `docs/decisions/` for the ADRs, and
-`docs/build-plan.md` for the phased plan.
+ledger. Every balance is a projection.
+
+## Where facts live
+
+Every fact in this project has **exactly one owning file**. Read the owner. Never restate a fact from
+an owning file into a non-owning file — link to it instead. **If two files disagree, the owner wins,
+and the disagreement is a bug to fix, not a reading to choose between** — say so before you continue.
+
+| If you need…                                            | The owner is                                                   |
+| ------------------------------------------------------- | -------------------------------------------------------------- |
+| Golden rules, working rhythm, definition of done        | `CLAUDE.md` (this file)                                        |
+| The coding contract (naming, TS, SQL, tests, commits)   | [`docs/conventions.md`](docs/conventions.md)                   |
+| Chart of accounts, `kind` values, constraints, triggers | **the migrations** — `apps/indexer/src/migrations/`            |
+| Metric names and the permitted label set                | [`docs/observability.md`](docs/observability.md) §1            |
+| What is actually built                                  | [`docs/progress.md`](docs/progress.md)                         |
+| Why a decision was made                                 | [`docs/decisions/`](docs/decisions/)                           |
+| How the system is designed                              | [`docs/architecture.md`](docs/architecture.md)                 |
+| The edge-case matrix                                    | [`docs/failure-modes.md`](docs/failure-modes.md)               |
+| What to build next, in which file                       | [`docs/implementation-guide.md`](docs/implementation-guide.md) |
+| Exit criteria, and what to cut first                    | [`docs/build-plan.md`](docs/build-plan.md)                     |
+| Why a piece exists — the concepts                       | [`docs/learning-path.md`](docs/learning-path.md)               |
+
+Row 3 is the load-bearing one: **for anything the database enforces, the migration is the truth and
+every doc is a description of it.** Docs describing a constraint drift silently; a `CHECK` cannot.
+`pnpm docs:check` enforces the rows it can check mechanically.
+
+[`docs/ARCHITECTURE-WALKTHROUGH.md`](docs/ARCHITECTURE-WALKTHROUGH.md) **teaches** the design from
+zero and owns nothing. It is the best entry point for a new reader and never the authority for a
+value — where it restates a constant, that constant's owner above wins.
 
 ## Golden rules (do not violate)
 
@@ -47,11 +73,30 @@ ledger. Every balance is a projection. See `docs/architecture.md` for the design
 
 ## Working rhythm
 
-> **make it work → make it correct (tests) → make it observable → commit.**
+> **make it work → `adversarial-tester` writes the tests → `ledger-reviewer` reviews the diff →
+> make it observable → update `docs/progress.md` → commit.**
 
-- Build **phase by phase** (Phases 0–13 in `docs/build-plan.md`). Each phase ends in a working,
-  committable, demoable state. Do not start a later phase before the current one meets its exit
-  criteria.
+The two subagents are defined in `.claude/agents/`. They are not optional garnish: the agent that
+wrote an implementation is the worst possible judge of it, because it tests the cases it was already
+thinking about. Both run with no access to the implementer's reasoning — only the code on disk and
+the project's own binding documents.
+
+**The unit of that rule is the changed file, not the session.** "I invoked `adversarial-tester`" is
+not the standard; "every file I changed was tested by someone who did not change it" is. The
+2026-09-06 audit met the first and failed the second — two of fourteen changed files went to the
+agent, the author tested two more himself, and three had no tests at all. Handing over the remainder
+afterwards found four more real defects, three of them in the audit's own fixes. Writing the test
+yourself is most tempting exactly when the code looks obviously correct, which is when it is least
+likely to be.
+
+- Build **block by block** (Blocks `N.M` within Parts 0–13 — see
+  [`docs/implementation-guide.md`](docs/implementation-guide.md) for the order,
+  [`docs/build-plan.md`](docs/build-plan.md) for the exit criteria). One block per session. Each
+  block ends in a working, committable state. Do not start a later block before the current one
+  meets its exit criteria.
+- A block is done when it has produced **all five** of: the code, its test, the `Verify` step's
+  actual output, the `docs/progress.md` diff, and one conventional commit containing all four. If
+  any of the five is missing, the block is `▶`, not `✅`.
 - Every new path gets a metric and, where it tells a story, a custom span before it is done.
 - **Every entry in `docs/failure-modes.md` names the test that proves it.** Adding a failure mode
   without its test is adding a claim, not a design.
@@ -81,6 +126,26 @@ infra | docs | ci | deps | repo`. Example: `feat(ledger): enforce per-asset bala
 - **Config lives in git.** Grafana dashboards, Prometheus rules and alert routes are
   provisioned-as-code — never hand-clicked in a UI.
 
+## Shapes that are always wrong here
+
+Each of these shipped into this repo at least once and was caught in review, not by a test. They are
+listed as _shapes_ because that is how you recognise them before you have finished writing the line.
+
+- **`findOne` → `if (!found)` → `insert`.** A race, always, however unlikely concurrency feels for
+  that path. Use `INSERT ... ON CONFLICT`.
+- **An unlocked read that decides whether a write is legal.** A balance check, a limit check, a
+  float check. Under `READ COMMITTED` two callers each read a state excluding the other's uncommitted
+  rows and both pass. Take the row lock, or name what else serializes them.
+- **A "residual", "remainder" or "dust" value whose unit is not a named asset's minor unit.** It
+  cannot be journaled, so it will be dropped — and dropped dust is what makes a trial balance drift.
+- **A guarantee enforced only in TypeScript.** Ask what stops a second code path, a migration, or a
+  `psql` session at 3am. If the answer is "callers go through this function", it is a convention, not
+  a constraint. Name the `CHECK`, foreign key or trigger that actually holds it.
+- **A doc example that was never executed.** It is already wrong or shortly will be. Copy it into a
+  test, or generate it from the code.
+- **A comment describing behavior the function does not have.** Delete it or implement it — a stale
+  comment actively misleads, which is worse than silence (`docs/conventions.md` §5).
+
 ## Honesty rules
 
 This project models a regulated domain it is not licensed to operate in. Being precise about that is
@@ -103,31 +168,28 @@ infra               docker-compose + Prometheus/Grafana/OTel/Jaeger/Alertmanager
 docs                architecture · failure-modes · decisions/ · conventions · observability · runbook · build-plan
 ```
 
-## The four planning documents
-
-They answer different questions. Use the right one.
-
-| Document                                                       | Answers                                                             |
-| -------------------------------------------------------------- | ------------------------------------------------------------------- |
-| [`docs/build-plan.md`](docs/build-plan.md)                     | _What_ phases exist, exit criteria, what to cut first               |
-| [`docs/learning-path.md`](docs/learning-path.md)               | _Why_ each piece exists — the concepts, in 45 blocks                |
-| [`docs/implementation-guide.md`](docs/implementation-guide.md) | _What to type, in which file, in what order_ — the dependency chain |
-| [`docs/progress.md`](docs/progress.md)                         | _What is done_ — the tracker                                        |
-
-Work block by block through `implementation-guide.md`. Read the matching block in
-`learning-path.md` first.
-
 ## Definition of done for a change
 
-- [ ] Behavior implemented and covered by a test (unit / integration as appropriate).
-- [ ] The block's `Verify` step in `implementation-guide.md` was actually run, not assumed.
-- [ ] New failure modes documented in `docs/failure-modes.md` **with their test**.
-- [ ] Metrics/spans added for any new path; labels within the permitted set.
-- [ ] Money handled as integer minor units, single asset per expression.
-- [ ] A significant design choice has an ADR with alternatives and why they lost.
-- [ ] `pnpm lint` and `pnpm typecheck` clean.
-- [ ] **[`docs/progress.md`](docs/progress.md) updated — in this same commit.** Flip the block to
-      ✅, fill in date and commit, update the progress bar and "Next action", add a Log entry if a
-      design decision changed. A tracker updated in a later commit drifts, and a drifted tracker is
-      worse than none because it states things that aren't true.
-- [ ] Conventional commit message.
+**Every line names how it is checked.** A checkbox you can tick from memory gets ticked; a checkbox
+with a command next to it gets run. Run the command.
+
+| ✔   | Done means                                             | Checked by                                                                                                                                                                                |
+| --- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ☐   | Behavior implemented and covered by a test             | `pnpm test` and `pnpm test:integration` — both green, output pasted                                                                                                                       |
+| ☐   | The block's `Verify` step actually run                 | paste its **real output** into the commit body; "assumed" is not "verified"                                                                                                               |
+| ☐   | Independent tests, **per changed file**                | list the files with non-comment changes (`git diff --name-only main...HEAD`); each has a test written by someone who did not write it, or the commit body names the file and says why not |
+| ☐   | Independent review of the final diff                   | `ledger-reviewer` ran; every finding resolved or recorded — **required** for `ledger/`, `sagas/`, `chain-writer/`, `compliance/`, `migrations/`                                           |
+| ☐   | New failure modes documented **with their test**       | `rg "<the new rejection path>" docs/failure-modes.md` finds it                                                                                                                            |
+| ☐   | Metrics/spans on any new path, labels permitted        | `rg 'metrics\.' <changed files>` is non-empty, or the commit body says why not                                                                                                            |
+| ☐   | Money is integer minor units, one asset per expression | `rg ': number' <changed files>` has no money-typed hit                                                                                                                                    |
+| ☐   | Significant design choice has an ADR                   | a new file in `docs/decisions/` with alternatives and why each lost                                                                                                                       |
+| ☐   | Docs and schema still agree                            | `pnpm docs:check`                                                                                                                                                                         |
+| ☐   | Lint, types, formatting clean                          | `pnpm lint && pnpm typecheck && pnpm format:check`                                                                                                                                        |
+| ☐   | `docs/progress.md` updated **in this same commit**     | `git diff --cached --name-only \| rg docs/progress.md`                                                                                                                                    |
+| ☐   | Conventional commit message                            | commitlint (husky `commit-msg`)                                                                                                                                                           |
+
+On the tracker: flip the block to ✅, fill in date and commit, update the progress bar and "Next
+action", add a Log entry if a design decision changed. **Only add information** — never overwrite an
+earlier completion date in place; record an extension in the Notes column or the Log instead. A
+tracker updated in a later commit drifts, and a drifted tracker is worse than none because it states
+things that aren't true.

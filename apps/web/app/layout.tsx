@@ -5,7 +5,7 @@ export const metadata = {
   description: "A fiat ⇄ stablecoin payment rail with a real double-entry ledger.",
 };
 
-// TODO(Phase 6): wrap children in QueryClientProvider (config in app/providers.tsx).
+// TODO(Part 6): wrap children in QueryClientProvider (config in app/providers.tsx).
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">

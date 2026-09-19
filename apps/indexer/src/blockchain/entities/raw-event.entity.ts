@@ -17,7 +17,7 @@
  * EVERY read must filter `WHERE NOT is_orphaned` — reads go through the repository method that
  * applies it, not through the raw table.
  *
- * TODO(Phase 4): TypeORM @Entity with columns (indicative):
+ * TODO(Part 4): TypeORM @Entity with columns (indicative):
  *   id (pk), chain_id, block_number, block_hash, tx_hash, log_index, contract, event_name,
  *   args (jsonb), status ('processed' | 'failed'), is_orphaned, orphaned_at, created_at.
  *   Partial unique index above; index on (chain_id, block_hash); index on (block_number, log_index).

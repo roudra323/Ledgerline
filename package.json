@@ -11,16 +11,19 @@
   "scripts": {
     "prepare": "husky",
     "build": "pnpm -r build",
-    "lint": "eslint .",
+    "lint": "eslint . && node scripts/docs-check.mjs",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test",
+    "test": "pnpm -r test && pnpm test:scripts",
+    "test:scripts": "node --test scripts/*.spec.mjs",
+    "test:integration": "pnpm --filter @ledgerline/indexer test:integration",
     "contracts:test": "pnpm --filter @ledgerline/contracts test",
     "up": "docker compose -f infra/docker-compose.yml up -d",
     "down": "docker compose -f infra/docker-compose.yml down",
-    "demo": "docker compose -f infra/docker-compose.yml --profile demo up"
+    "demo": "docker compose -f infra/docker-compose.yml --profile demo up",
+    "docs:check": "node scripts/docs-check.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.6.1",

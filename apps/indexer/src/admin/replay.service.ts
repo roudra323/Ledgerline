@@ -1,7 +1,7 @@
 /**
  * ReplayService — rebuilds projections deterministically from raw_events. The event-sourcing payoff.
  *
- * TODO(Phase 2) rebuild(projections):
+ * TODO(Part 4) rebuild(projections):
  *   1. pause the dispatch loop.
  *   2. truncate the target projection tables.
  *   3. stream raw_events ORDERED by (block_number, log_index) through the handlers.

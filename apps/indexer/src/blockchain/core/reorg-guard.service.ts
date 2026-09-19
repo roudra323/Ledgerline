@@ -1,7 +1,7 @@
 /**
  * ReorgGuardService — protects projections from chain reorganizations.
  *
- * TODO(Phase 2):
+ * TODO(Part 4):
  *   - confirmation depth: never process past (head - CONFIRMATIONS).
  *   - hash continuity: verify parentHash of the next block matches the last persisted block hash.
  *   - on divergence: orphan affected raw_events, rewind the cursor, replay the affected range.

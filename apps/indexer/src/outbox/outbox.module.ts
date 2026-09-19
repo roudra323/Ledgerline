@@ -8,7 +8,7 @@
  *   the outbox `dedupe_key` IS the downstream idempotency key — the PSP Idempotency-Key, or
  *   chain_transactions.intent_key. This is what makes at-least-once delivery safe.
  *
- * TODO(Phase 5):
+ * TODO(Part 5):
  *   - OutboxMessage entity, UNIQUE(kind, dedupe_key).
  *   - OutboxWorker: claim query, retry at now() + min(2^attempt, 3600)s with +/-20% jitter,
  *     lease expiry for crash recovery, `dead` after max_attempts + alert.

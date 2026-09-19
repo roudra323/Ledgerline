@@ -24,8 +24,15 @@ writes to the chain, and serves the read API.
 pnpm start:dev
 pnpm migration:generate --name AddSomething
 pnpm migration:run
-pnpm test
+pnpm test              # unit — no database needed
+pnpm test:integration  # needs Postgres reachable at DATABASE_URL
 ```
+
+`test:integration` creates a throwaway database (`ledgerline_test_<uuid>`), migrates it, runs the
+suite against it and drops it. It never touches the database in `DATABASE_URL` itself — it only
+borrows the connection to issue `CREATE DATABASE`, so that role needs the privilege. The ledger's
+log tables are immutable by design, so a test cannot clean up after itself; a fresh database per run
+is the only way the suite stays deterministic.
 
 ## The rule to remember
 
