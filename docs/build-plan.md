@@ -260,11 +260,13 @@ The load-bearing tests, in rough order of value:
 12. **`PaymentGatewayPort` contract suite** — one shared suite run against MockPSP and `stripe-mock`.
     This is what proves the port is not a toy, far more cheaply than a full Stripe e2e.
 
-**CI jobs:** `lint` (eslint, `docs:check` and `typecheck`) · `contracts` · `unit` · `integration` (a
-GitHub Actions `postgres:17` service and a throwaway database per run; Anvil joins when Part 4's
-indexer tests need it) · `docker-build`. The Stripe e2e is a manually-dispatched workflow only — test-mode Stripe in
-CI means network flakiness, secrets in Actions, webhook tunnelling and rate limits, for signal that is
-90% obtainable from `stripe-mock`.
+**CI jobs:** `lint` (eslint, `docs:check` and `typecheck`) · `contracts` (commented out until Block
+2.1 — Part 2 has nothing to test yet) · `unit` (the indexer and the scripts only, until contracts
+and mock-psp have real tests) · `integration` (a GitHub Actions `postgres:17` service and a
+throwaway database per run; Anvil joins when Part 4's indexer tests need it) · `docker-build`. The
+Stripe e2e is a manually-dispatched workflow only — test-mode Stripe in CI means network flakiness,
+secrets in Actions, webhook tunnelling and rate limits, for signal that is 90% obtainable from
+`stripe-mock`.
 
 ---
 

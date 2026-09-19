@@ -241,6 +241,15 @@ Re-run before every commit. Update the date when you do.
 Newest first. Record anything a future reader would need: decisions taken, things that surprised
 you, blocks cut and why, questions you couldn't answer.
 
+### 2026-09-20 — CI runs only what is built
+
+`ci.yml` now runs only jobs for completed work. The `contracts` job is commented out until Block 2.1
+— Part 2 has no completed block. The `unit` job ran the root `pnpm test`, which fans out to every
+workspace, including the contracts' `forge test` (Part 2, and that job never installs Foundry, so it
+would fail on GitHub while passing locally) and mock-psp's tests (Part 5). It now runs the indexer's
+tests and the script tests only, with the full fan-out left commented under `TODO(Block 5.1)`.
+`lint`, `integration` and `docker-build` stay: they cover Phase 0 and Part 1.
+
 ### 2026-09-20 — `convert()`'s rounding direction, written down and pinned
 
 Asked what happens at a rate like 3/2: the floor on delivery and the ceiling on consumption are one
