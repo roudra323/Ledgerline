@@ -36,29 +36,31 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm format:check
 
-  contracts:
-    name: Foundry tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: foundry-rs/foundry-toolchain@v1
-      # Foundry deps live in lib/ (git-ignored) and are installed here, not committed.
-      # TODO(Block 2.0): pin both to a tag. Unpinned installs make the contracts build
-      # non-reproducible, which is indefensible in a project whose thesis is determinism. Left
-      # unpinned only because Block 2.0 is where the versions actually get chosen - pinning to a
-      # guessed tag now would be worse than the honest TODO.
-      - name: Install contract dependencies
-        working-directory: packages/contracts
-        run: |
-          forge install foundry-rs/forge-std
-          forge install OpenZeppelin/openzeppelin-contracts
-      - name: forge build
-        working-directory: packages/contracts
-        run: forge build --sizes
-      - name: forge test
-        working-directory: packages/contracts
-        run: forge test -vvv
-      # TODO(Block 2.6): add `forge test --match-test invariant` and an optional slither job.
+  # Part 2 (contracts) has no completed block, so its job is off until there is something to test.
+  # TODO(Block 2.1): uncomment when StableUSD lands with its first real tests.
+  # contracts:
+  #   name: Foundry tests
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: foundry-rs/foundry-toolchain@v1
+  #     # Foundry deps live in lib/ (git-ignored) and are installed here, not committed.
+  #     # TODO(Block 2.0): pin both to a tag. Unpinned installs make the contracts build
+  #     # non-reproducible, which is indefensible in a project whose thesis is determinism. Left
+  #     # unpinned only because Block 2.0 is where the versions actually get chosen - pinning to a
+  #     # guessed tag now would be worse than the honest TODO.
+  #     - name: Install contract dependencies
+  #       working-directory: packages/contracts
+  #       run: |
+  #         forge install foundry-rs/forge-std
+  #         forge install OpenZeppelin/openzeppelin-contracts
+  #     - name: forge build
+  #       working-directory: packages/contracts
+  #       run: forge build --sizes
+  #     - name: forge test
+  #       working-directory: packages/contracts
+  #       run: forge test -vvv
+  #     # TODO(Block 2.6): add `forge test --match-test invariant` and an optional slither job.
 
   unit:
     name: Unit tests
@@ -73,7 +75,14 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test
+      # Only the workspaces with completed blocks. `pnpm test` fans out to every workspace, which
+      # also runs the contracts' `forge test` (Part 2 — and this job has no Foundry) and mock-psp's
+      # tests (Part 5), neither of which has been built.
+      - run: pnpm --filter @ledgerline/indexer test
+      - run: pnpm test:scripts
+      # TODO(Block 5.1): switch back to the full fan-out once contracts and mock-psp have real
+      # tests — and add the foundry-rs/foundry-toolchain step here first, or forge is missing.
+      # - run: pnpm test
       # TODO(Block 4.5): replay-golden tests, once the replay service exists.
 
   integration:
