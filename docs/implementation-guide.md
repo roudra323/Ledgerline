@@ -56,8 +56,8 @@ why Part 1 comes first and why it must be right.
 
 ## Block 1.0 — Make the app boot and connect
 
-**Why now.** Nothing else can happen. `app.module.ts` is currently empty, `main.ts` boots a Nest app
-with no modules, and nothing opens a database connection. Every block after this one needs a running
+**Why now.** Nothing else can happen. Before this block (✅ done), `app.module.ts` was empty,
+`main.ts` booted a Nest app with no modules, and nothing opened a database connection. Every block after this one needs a running
 app with a live `DataSource` to inject.
 
 **Files.**
@@ -97,8 +97,9 @@ Then delete `DATABASE_URL` from `.env` and confirm it **refuses to start**.
 **Why now.** Pure functions with zero dependencies — no database, no Nest, no imports from the rest of
 the app. That means you can build and test it in isolation, and it's ready before anything needs it.
 
-Block 1.6 will import `splitFee` to calculate the platform fee. Block 6.4 will import `convert` to
-turn dollars into tokens. Writing it now means neither of those blocks has to stop and invent it.
+Block 6.4 will import `splitFee` to calculate the platform fee for T3 and `convert` to turn dollars
+into tokens. (Block 1.6, the ledger's single writer, deliberately imports neither: `post()` takes
+already-computed legs, and the saga that builds them is where the money math lives.) Writing it now means neither of those blocks has to stop and invent it.
 
 **Files.**
 
@@ -140,10 +141,10 @@ const net = amount - fee; // derived, so fee + net === amount ALWAYS
 Round both sides independently and you invent or destroy a cent. Deriving makes it exact by
 construction, not by luck.
 
-`convert` — return the leftover instead of dropping it. Block 1.6 will post that residual to account
-`3900`. Dropped dust is the single most common reason a ledger stops balancing.
+`convert` — return the leftover instead of dropping it. The saga that converts (Block 9.x's
+`payout.burned`) posts that residual to account `3900`, in the source asset (ADR-0015). Dropped dust is the single most common reason a ledger stops balancing.
 
-**Needed by.** Block 1.6 (`splitFee`), Block 6.4 (`convert`), Block 9.x (payout FX).
+**Needed by.** Block 6.4 (`splitFee`, `convert`), Block 9.x (payout FX).
 
 **Verify.** `pnpm --filter @ledgerline/indexer test` — the property test asserts
 `fee + net === amount` across thousands of random inputs.
@@ -183,8 +184,8 @@ remaining tables.
 **Order within the block.** Migration first (so the tables exist) → entities → register in the module.
 
 **Why `asset.entity.ts` matters more than it looks.** `convert()` needs to know that USD has 2
-decimals and USDX has 6. That fact lives in the `assets` table. Without this entity, Block 1.6 has no
-way to read it and you'd be tempted to hardcode `6` somewhere — which is exactly the bug that breaks
+decimals and USDX has 6. That fact lives in the `assets` table. Without this entity, the saga that calls `convert()`
+(Block 6.4) has no way to read it and you'd be tempted to hardcode `6` somewhere — which is exactly the bug that breaks
 the day you add a second token.
 
 **The column that carries the whole idempotency story.**
@@ -331,7 +332,8 @@ await ledger.post({
 
 **Why `AccountRegistry` is separate.** Callers know _"the merchant payable account"_; they should not
 know its UUID. Platform accounts are singletons (`'1000'`); per-merchant accounts need
-`('2000', merchantId)` and are **created on demand** the first time a merchant is paid. Keeping that
+`('2000', merchantId)` and are **created on demand** the first time a merchant is owed — T3, where
+`merchant_payable` is first credited (ADR-0018). Keeping that
 lookup out of `post()` keeps `post()` about posting.
 
 **What `post()` does, in one transaction.**
@@ -384,7 +386,7 @@ Block 9 depends on.
 | ---------------------------------------------------------- | ---- | ------------------------------ |
 | `apps/indexer/src/ledger/balance.repository.ts`            | NEW  | Row-locking read and update    |
 | `apps/indexer/src/ledger/ledger.service.ts`                | EDIT | Call it inside the transaction |
-| `apps/indexer/test/ledger-concurrency.integration-spec.ts` | NEW  | The 20-vs-10 test              |
+| `apps/indexer/test/ledger-concurrency.integration-spec.ts` | EDIT | Re-run the 20-vs-10 test       |
 
 **The operation.**
 
@@ -399,9 +401,13 @@ RETURNING balance_minor;
 touching the same account are forced into a queue by Postgres. One sees the balance _after_ the other
 committed.
 
-Without it, two simultaneous payouts both read "$500 available," both approve, and you've spent $1000
-you don't have. **The projection is your concurrency control**, and Block 9.x will reserve treasury
-float inside exactly this lock.
+Without a lock, two simultaneous payouts both read "$500 available," both approve, and you've spent
+$1000 you don't have. Today that lock already exists: the 2026-09-06 audit added a `FOR NO KEY UPDATE`
+lock on the **account row** inside the non-negative trigger, and the 20-vs-10 test in
+`ledger-concurrency.integration-spec.ts` already passes through it
+([ADR-0017](decisions/0017-non-negative-enforcement.md)). This block moves the lock target onto the
+projection row, which is the natural place for it and removes the full-history rescan. Block 6.4's T4
+reserves treasury float under this same lock.
 
 **Needed by.** Block 6.4 (float reservation), Block 7.1 (invariant I2), the read API.
 
@@ -603,7 +609,7 @@ you'll stub four things and debug all of them at once.
 | **6.1** Intent aggregate | `migrations/<ts>-PaymentIntents.ts`, `sagas/onramp/entities/payment-intent.entity.ts`, `sagas/onramp/onramp-status.ts` | 6.3–6.5       |
 | **6.2** Idempotency      | `migrations/<ts>-IdempotencyKeys.ts`, `api/idempotency.interceptor.ts`, `api/entities/idempotency-key.entity.ts`       | 6.5           |
 | **6.3** Transitions      | `migrations/<ts>-SagaTransitions.ts`, `sagas/entities/saga-transition.entity.ts`, `sagas/saga-transition.service.ts`   | 6.4, 8.x, 9.x |
-| **6.4** Wire the saga    | `sagas/onramp/onramp.saga.ts`, `onramp-transitions.ts`, `handlers/*.ts`, outbox handlers                               | 6.5           |
+| **6.4** Wire the saga    | `sagas/onramp/onramp.saga.ts`, `onramp-transitions.ts`, `handlers/*.ts`, outbox handlers, operator mint command        | 6.5           |
 | **6.5** API              | `api/payment-intents.controller.ts`, `merchants.controller.ts`, DTOs                                                   | 6.6           |
 | **6.6** UI               | `apps/web/app/{checkout,merchant}/page.tsx`, `lib/api.ts`                                                              | Demo          |
 
@@ -615,7 +621,10 @@ wallet address mid-flight must not redirect money the customer already authorise
 `UNIQUE(saga_type, saga_id, cause_type, cause_id)` is what makes applying the same cause twice a
 database no-op — so Block 6.4 never writes "have I handled this already?"
 
-**The wiring order inside 6.4:**
+**The wiring order inside 6.4.** First, float: an operator command mints to the treasury and posts
+`treasury.mint` (`DR 1100 / CR 2500`) — ADR-0013 keeps minting out of the payment, so without it T4
+has nothing to reserve. Then the payment, with the postings of
+[ADR-0018](decisions/0018-ledger-flow-postings.md):
 
 ```
 POST /payment-intents  → create intent (status=quoted)
@@ -623,7 +632,8 @@ POST /payment-intents  → create intent (status=quoted)
 mock-psp charges       → webhook → fiat_events       [5.2]
 dispatcher             → transition captured         [5.4 → 6.3]
                        → ledger.post(T1)             [1.6]
-                       → reserve float (row lock)    [1.7]
+                       → ledger.post(T3)  fee + FX, merchant now owed   [1.1 → 1.6]
+                       → ledger.post(T4)  reserve float from 1100       [1.6 → 1.7]
                        → outbox: chain.submit        [5.5 → 3.4]
 submitter              → settle() on-chain           [3.4 → 2.4]
 indexer sees event     → transition chain_confirmed  [4.3 → 6.3]
@@ -681,7 +691,10 @@ Once Part 7 is done you have a complete, defensible project. See
 
 ## Where to start right now
 
+Blocks 1.0–1.6 are done. [`progress.md`](progress.md)'s **Next action** names the current block —
+at the time of writing, Block 1.7:
+
 ```bash
-git checkout -b feat/ledger-core
-# Block 1.0 — apps/indexer/src/config/env.schema.ts
+git checkout -b feat/ledger-balances
+# Block 1.7 — apps/indexer/src/ledger/balance.repository.ts
 ```

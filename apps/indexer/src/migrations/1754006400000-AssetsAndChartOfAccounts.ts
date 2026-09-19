@@ -79,7 +79,8 @@ export class AssetsAndChartOfAccounts1754006400000 implements MigrationInterface
     `);
 
     // ── the platform chart of accounts ────────────────────────────────────────
-    // Per-merchant accounts (1300, 2000, 2010, 2200) are created on merchant onboarding, not here.
+    // Per-merchant accounts (1300, 2000, 2010, 2200) are not seeded: AccountRegistryService creates
+    // each one the first time a posting names it.
     await queryRunner.query(`
       INSERT INTO ledger_accounts (code, name, account_type, normal_side, asset_code, owner_type, allows_negative) VALUES
         ('1000', 'psp_receivable',     'asset',     'debit',  'USD',  'platform', false),
@@ -101,8 +102,9 @@ export class AssetsAndChartOfAccounts1754006400000 implements MigrationInterface
     `);
 
     // The FX clearing pair and the rounding sink are the only accounts allowed to go negative:
-    // they are transient by nature and must never block a posting. Everything else that overdraws
-    // is a bug we want surfaced at COMMIT.
+    // their balances are positions, not holdings — the FX pair carries a standing position of
+    // either sign as conversions accumulate (ADR-0018) — so they must never block a posting.
+    // Everything else that overdraws is a bug we want surfaced at COMMIT.
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

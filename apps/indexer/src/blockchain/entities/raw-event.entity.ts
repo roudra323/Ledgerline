@@ -2,7 +2,7 @@
  * raw_events — append-only source of truth for every decoded on-chain event.
  *
  * Half of the idempotency backbone (the other half is `fiat_events`). Inserts use
- * ON CONFLICT DO NOTHING. Projections are rebuilt from this table by the ReplayService.
+ * ON CONFLICT DO NOTHING. The ReplayService rebuilds projections from this table and `fiat_events`.
  *
  * The uniqueness rule is a PARTIAL index, not a total one — see
  * docs/decisions/0010-raw-events-partial-unique.md:

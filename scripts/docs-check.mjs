@@ -12,7 +12,7 @@
  * fact acquires a second copy.
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname;
@@ -79,6 +79,24 @@ function postingKindsIn(markdown) {
   return kinds;
 }
 
+/**
+ * Ledger kinds named in prose as a SQL-style literal — `kind='reconciliation.adjustment'`.
+ *
+ * runbook.md named a kind the CHECK rejected this way and neither detector above could see it,
+ * because it sat in a sentence rather than a posting sample. `outbox_messages` has its own `kind`
+ * column with its own vocabulary (`chain.gas_refill`), so a line that mentions the outbox is
+ * describing that column, not the ledger's.
+ */
+function proseLedgerKindsIn(markdown) {
+  const kinds = [];
+  for (const line of markdown.split("\n")) {
+    if (/outbox/i.test(line)) continue;
+    // Either quote: SQL writes 'x', but prose authors do not reliably follow SQL.
+    for (const literal of line.matchAll(/\bkind\s*=\s*(["'])([^"']+)\1/g)) kinds.push(literal[2]);
+  }
+  return kinds;
+}
+
 /** Four-digit account codes in the first cell of each markdown table row. */
 function accountCodesInTable(lines) {
   const codes = new Set();
@@ -139,8 +157,8 @@ if (!kindMigration) {
     }
   }
 
-  // Two shapes carry a ledger kind in the docs: a posting sample's `kind:`, and the worked example's
-  // `T<n>  <kind>` lines. Deliberately narrow — PSP webhook event types (`refund.succeeded`,
+  // Three shapes carry a ledger kind in the docs: a posting sample's `kind:`, the worked example's
+  // `T<n>  <kind>` lines, and a SQL-style literal in prose (proseLedgerKindsIn). Deliberately narrow — PSP webhook event types (`refund.succeeded`,
   // `payout.paid`) look identical and are a different vocabulary, and a bare `kind:` also appears in
   // unrelated TypeScript (`{ kind: 'live' | 'backfill' }` in conventions.md §3), which is why the
   // scan below requires the surrounding fenced block to actually be a posting.
@@ -149,6 +167,7 @@ if (!kindMigration) {
     const documented = [
       ...postingKindsIn(markdown),
       ...captureAll(markdown, /^T\d+ +([a-z_][a-z_.]*)/gm),
+      ...proseLedgerKindsIn(markdown),
     ];
     for (const kind of documented) {
       if (!schemaKinds.has(kind)) {
@@ -249,43 +268,53 @@ const knownBlocks = new Set(captureAll(progress, /^\|\s*(\d+\.\d+)\s*\|/gm));
 // A stub standing in for a whole part (an unwritten module) may name the part instead of a block.
 const knownParts = new Set([...knownBlocks].map((block) => block.split(".")[0]));
 
+// Future-work markers live in config as well as source — compose files, dashboards, Foundry and
+// package manifests, the Makefile — and a marker naming a retired phase is as stale there as in code.
+const TODO_BEARING_FILE = /(\.(ts|tsx|sol|mjs|ya?ml|json|toml|sh)|^Makefile)$/;
+const SKIPPED_DIRS = new Set(["node_modules", "dist", "lib", "out", "cache", ".next"]);
+
 function* sourceFiles(dir) {
   for (const entry of readdirSync(join(REPO_ROOT, dir), { withFileTypes: true })) {
-    if (entry.name === "node_modules" || entry.name === "dist" || entry.name === "lib") continue;
+    if (SKIPPED_DIRS.has(entry.name)) continue;
     const path = join(dir, entry.name);
     if (entry.isDirectory()) yield* sourceFiles(path);
-    else if (/\.(ts|tsx|sol|mjs)$/.test(entry.name)) yield path;
+    else if (TODO_BEARING_FILE.test(entry.name)) yield path;
   }
 }
 
-for (const dir of ["apps", "packages", "infra"]) {
-  for (const path of sourceFiles(dir)) {
-    const source = read(path);
-    for (const block of captureAll(source, /TODO\(Block (\d+\.\d+)\)/g)) {
-      if (!knownBlocks.has(block)) {
-        fail(
-          "todos",
-          `${path} has TODO(Block ${block}), which is not a block in progress.md`,
-          "docs/progress.md",
-        );
-      }
-    }
-    for (const part of captureAll(source, /TODO\(Part (\d+)\)/g)) {
-      if (!knownParts.has(part)) {
-        fail(
-          "todos",
-          `${path} has TODO(Part ${part}), which is not a part in progress.md`,
-          "docs/progress.md",
-        );
-      }
-    }
-    for (const phase of captureAll(source, /TODO\((Phase [^)]+)\)/g)) {
+function* todoBearingFiles() {
+  for (const dir of ["apps", "packages", "infra"]) yield* sourceFiles(dir);
+  // The one hand-named path: everything else comes from walking a directory, so only this one can be
+  // missing, and a missing Makefile has no TODOs to check — not a reason to crash the whole run.
+  if (existsSync(join(REPO_ROOT, "Makefile"))) yield "Makefile";
+}
+
+for (const path of todoBearingFiles()) {
+  const source = read(path);
+  for (const block of captureAll(source, /TODO\(Block (\d+\.\d+)\)/g)) {
+    if (!knownBlocks.has(block)) {
       fail(
         "todos",
-        `${path} still uses TODO(${phase}) — markers name a Block N.M or a Part N`,
-        "CLAUDE.md",
+        `${path} has TODO(Block ${block}), which is not a block in progress.md`,
+        "docs/progress.md",
       );
     }
+  }
+  for (const part of captureAll(source, /TODO\(Part (\d+)\)/g)) {
+    if (!knownParts.has(part)) {
+      fail(
+        "todos",
+        `${path} has TODO(Part ${part}), which is not a part in progress.md`,
+        "docs/progress.md",
+      );
+    }
+  }
+  for (const phase of captureAll(source, /TODO\((Phase [^)]+)\)/g)) {
+    fail(
+      "todos",
+      `${path} still uses TODO(${phase}) — markers name a Block N.M or a Part N`,
+      "CLAUDE.md",
+    );
   }
 }
 

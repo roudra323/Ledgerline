@@ -1,5 +1,5 @@
 {
-  "__comment": "Dashboard 2 - Saga Flow. TODO(Phase 7): sagas_in_state as a funnel per saga_type, transition rate by to_status, saga_duration_seconds heatmap, compensation rate by reason_class, manual_review count, illegal/deferred transition counters.",
+  "__comment": "Dashboard 2 - Saga Flow. TODO(Block 7.3): sagas_in_state as a funnel per saga_type, transition rate by to_status, saga_duration_seconds heatmap, compensation rate by reason_class, manual_review count, illegal/deferred transition counters.",
   "title": "Ledgerline \u2014 Saga Flow",
   "uid": "ledgerline-saga-flow",
   "tags": ["ledgerline", "sagas"],
@@ -26,7 +26,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "On-ramp, refund and payout funnels, plus the compensation and manual-review rates. Built in **Phase 7**."
+        "content": "On-ramp, refund and payout funnels, plus the compensation and manual-review rates. Built in **Part 7**."
       }
     }
   ]

@@ -1,6 +1,7 @@
 # ADR-0009 — On-chain only what must survive a compromised server
 
-**Status:** Accepted
+**Status:** Accepted — the on-chain fee ("fee _charged_, emitted per settlement") is superseded by
+[ADR-0018](0018-ledger-flow-postings.md): the fee is taken off-chain only, and `settle()`'s fee is 0.
 
 ## Context
 

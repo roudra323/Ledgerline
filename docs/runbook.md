@@ -63,15 +63,16 @@ SUM(CASE WHEN direction='debit' THEN amount_minor ELSE -amount_minor END) <> 0;`
 - **Meaning:** we have issued more `USDX` than we hold fiat backing for. For a stablecoin issuer this
   is the definition of the fatal condition.
 - **Likely causes:** (1) fee accounting timing — fees credited before PSP settlement, usually a small
-  transient dip; (2) a mint that ran without a corresponding capture; (3) a chargeback that removed
+  transient dip; (2) a mint that outran the fiat backing it — mints are treasury operations (`treasury.mint`, operator command or rebalance, never part of a payment; ADR-0013), so check the last one against `bank_settlement + psp_receivable` at the time it ran; (3) a chargeback that removed
   fiat while tokens stayed outstanding.
 - **Resolution:**
   1. **Halt minting:** freeze the `treasury_minter` account.
   2. Decompose: compare `stablecoin_issued` against `psp_receivable + bank_settlement` on the Money
      Truth dashboard. Which side moved?
   3. If fiat fell → chargebacks (expected; the debt is recorded in `merchant_receivable`). If tokens
-     rose → find the mint in `chain_transactions` and the saga that requested it.
-- **Verify:** ratio ≥ 1; if it was case (3), the offending mint has a reversing burn.
+     rose → find the mint in `chain_transactions` and its `treasury.mint` posting, and the operator
+     command or rebalance run that requested it.
+- **Verify:** ratio ≥ 1; if it was case (2), the offending mint has a reversing burn.
 
 ## ReorgBeyondConfirmations (page)
 
@@ -105,11 +106,11 @@ Decision tree — **direction tells you what it is:**
 - **Chain ahead of ledger** _and_ lag is normal → check `unknown_outflows_total`. Non-zero → follow
   **UnknownTreasuryOutflow** above. Zero → a handler is failing; check `indexer_failures`.
 - **Ledger ahead of chain** → we recorded something the chain does not show. Should be impossible
-  (pending value sits in `token_in_transit`). Run `ReplayService`. If replay resolves it, it was a
+  (pending value sits in `merchant_payable` / `token_in_transit`). Run `ReplayService`. If replay resolves it, it was a
   projection bug — find it. **If replay does not resolve it, it was a premature credit, which is a
   real loss** — escalate.
 - **Verify:** drift returns to 0 at `head - CONFIRMATIONS`, not at head. Comparing a settled ledger
-  against unsettled chain state makes drift oscillate; the reconciler already reads at depth.
+  against unsettled chain state makes drift oscillate, which is why the reconciler is specified to read at depth (Block 7.1).
 
 ## ForgedFiatEvent
 
@@ -197,7 +198,7 @@ BY 1,2;` Fix the cause, then requeue via the admin endpoint. Because `dedupe_key
 | ------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SagasInManualReview`     | Human-decision queue is non-empty                            | Work the queue; each has a `failure_code` pointing at a `failure-modes.md` entry                                                                                       |
 | `GasBalanceLow`           | A signing account is running out of ETH                      | The auto-refill job should have fired — check `outbox_messages` for `kind='chain.gas_refill'`. Below the hard floor, sagas park in `awaiting_gas` rather than failing  |
-| `FloatBelowMinimum`       | Treasury token float below `liquidity_positions.min`         | Confirm the rebalance job is running. Sagas park in `awaiting_liquidity`; they are not lost                                                                            |
+| `FloatBelowMinimum`       | Treasury token float below `liquidity_positions.min`         | Run the operator mint (or confirm the rebalance job, if built, is running). Sagas park in `awaiting_liquidity`; they are not lost                                      |
 | `MinterAllowanceLow`      | <20% of the minter allowance remains                         | **Deliberately not auto-topped-up** — the allowance is a safety limit. Raise it consciously, via `configureMinter`, with a reason                                      |
 | `OutboxBacklog`           | Oldest pending message > 5 min                               | Check whether a downstream rail is slow (`psp_request_duration_seconds`) or the worker is not running                                                                  |
 | `UnmatchedFiatEventAging` | A `fiat_events` row has had no matching aggregate for 15 min | Usually a webhook for something we never created. Check for a failed intent creation; if the PSP charged, an automatic refund is required                              |

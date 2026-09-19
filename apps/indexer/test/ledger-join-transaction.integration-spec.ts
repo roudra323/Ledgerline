@@ -64,6 +64,17 @@ describe("LedgerService.post() joining a caller's transaction", () => {
     };
   }
 
+  /** The platform 1100 token_treasury balance, debit-positive (its normal side). */
+  async function treasuryBalanceUsdx(): Promise<bigint> {
+    const rows = await dataSource.query<{ balance: string }[]>(
+      `SELECT COALESCE(SUM(CASE WHEN e.direction = 'debit' THEN e.amount_minor ELSE -e.amount_minor END), 0)::text AS balance
+         FROM ledger_entries e
+         JOIN ledger_accounts a ON a.id = e.account_id
+        WHERE a.code = '1100' AND a.asset_code = 'USDX' AND a.owner_type = 'platform'`,
+    );
+    return BigInt(rows[0]?.balance ?? "0");
+  }
+
   async function countTransactions(causeId: string): Promise<number> {
     const rows = await dataSource.query<{ count: string }[]>(
       `SELECT count(*)::text AS count FROM ledger_transactions WHERE cause_id = $1`,
@@ -123,19 +134,18 @@ describe("LedgerService.post() joining a caller's transaction", () => {
     await queryRunner.startTransaction();
 
     // Balanced in TypeScript and rejected by the database: 1100 token_treasury is
-    // allows_negative = false, and crediting it drives it below zero.
+    // allows_negative = false, and crediting it by one more than it holds drives it below zero.
+    // The amount is read live, never fixed: 1100 is a shared platform account that other spec
+    // files legitimately fund (ledger-flows mints float), so a hard-coded "large enough" credit is
+    // only large enough until one of them runs first.
+    const overdraw = ((await treasuryBalanceUsdx()) + 1n).toString();
     await ledger.post(
       {
         kind: "payout.burned",
         cause: { type: "fiat_event", id: causeId },
         entries: [
-          { accountCode: "1810", direction: "debit", assetCode: "USDX", amountMinor: "9999999999" },
-          {
-            accountCode: "1100",
-            direction: "credit",
-            assetCode: "USDX",
-            amountMinor: "9999999999",
-          },
+          { accountCode: "1810", direction: "debit", assetCode: "USDX", amountMinor: overdraw },
+          { accountCode: "1100", direction: "credit", assetCode: "USDX", amountMinor: overdraw },
         ],
       },
       queryRunner,

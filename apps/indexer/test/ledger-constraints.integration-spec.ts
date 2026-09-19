@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import "reflect-metadata";
 import { DataSource } from "typeorm";
 
@@ -313,6 +315,186 @@ describe("ledger balance constraint trigger", () => {
       const fxClearingUsd = await accountId("1800");
 
       await expect(creditAccount(fxClearingUsd, 50)).resolves.toBeUndefined();
+    });
+  });
+
+  /**
+   * docs/failure-modes.md C7: "a cross-asset transaction written as one 'balanced' set" must be
+   * rejected because assert_transaction_balances() (1754006400007-LedgerNonNegativeLock.ts) sums
+   * the per-transaction residual `GROUP BY asset_code`, not as one ungrouped total. A GROUP BY
+   * check can be fooled if legs are chosen so the *sum of the group residuals* still looks like
+   * zero some other way, or if a non-grouping implementation would pass while a correct one
+   * shouldn't. These tests construct exactly those shapes directly in SQL — the same bypass of
+   * LedgerService the rest of this file uses — so the claim is proven against the database, not
+   * against the TypeScript pre-check tested separately in ledger.service.spec.ts.
+   *
+   * All accounts here are disposable, test-owned rows (allows_negative = true, random owner_id),
+   * never the seeded platform singletons — a transaction that commits in this section leaves an
+   * unrecoverable balance behind (ledger rows are immutable, so there is no teardown), and per
+   * CLAUDE.md golden rule 1 / the ledger-reviewer's shared-reference-data rule that balance must
+   * never land on a row another test or the running system depends on.
+   */
+  describe("cross-asset transactions (C7)", () => {
+    /** A fresh, isolated account for one asset, never a seeded platform account. */
+    async function createDisposableAccount(assetCode: "USD" | "USDX"): Promise<string> {
+      const result = await dataSource.query<{ id: string }[]>(
+        `INSERT INTO ledger_accounts (code, name, account_type, normal_side, asset_code, owner_type, owner_id, allows_negative)
+         VALUES ($1, 'test_cross_asset_guard', 'asset', 'debit', $2, 'customer', gen_random_uuid(), true)
+         RETURNING id`,
+        [`test-c7-${randomUUID()}`, assetCode],
+      );
+      const row = result[0];
+      if (!row) throw new Error("insert into ledger_accounts returned no row");
+      return row.id;
+    }
+
+    /** One ledger_entries row, on the caller-managed queryRunner's transaction. */
+    async function insertEntry(
+      queryRunner: ReturnType<DataSource["createQueryRunner"]>,
+      transactionId: string,
+      accountId: string,
+      direction: "debit" | "credit",
+      assetCode: "USD" | "USDX",
+      amountMinor: number,
+      sequence: number,
+    ): Promise<void> {
+      await queryRunner.query(
+        `INSERT INTO ledger_entries (transaction_id, account_id, direction, asset_code, amount_minor, sequence)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [transactionId, accountId, direction, assetCode, amountMinor, sequence],
+      );
+    }
+
+    /** Counts ledger_entries surviving for a transaction, using a connection independent of the
+     * (possibly aborted) queryRunner — proving "rejected" also means "nothing persisted", not just
+     * that COMMIT itself threw. */
+    async function persistedEntryCount(transactionId: string): Promise<number> {
+      const rows = await dataSource.query<{ count: string }[]>(
+        `SELECT count(*)::text AS count FROM ledger_entries WHERE transaction_id = $1`,
+        [transactionId],
+      );
+      return Number(rows[0]?.count ?? "0");
+    }
+
+    it("rejects equal total debits and credits split across two assets (fools an ungrouped sum)", async () => {
+      const usdAccount = await createDisposableAccount("USD");
+      const usdxAccount = await createDisposableAccount("USDX");
+
+      const queryRunner = dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+
+      const transactionId = await createTransaction(`cross-asset-swap-${randomUUID()}`);
+
+      try {
+        // DR 100 USD, CR 100 (minor units) USDX. Ungrouped, debits(100) == credits(100) — a sum
+        // that doesn't GROUP BY asset_code would wrongly call this balanced. Grouped, USD has a
+        // lone debit and USDX has a lone credit: both groups are non-zero.
+        await insertEntry(queryRunner, transactionId, usdAccount, "debit", "USD", 100, 0);
+        await insertEntry(queryRunner, transactionId, usdxAccount, "credit", "USDX", 100, 1);
+
+        await expect(queryRunner.commitTransaction()).rejects.toThrow(/unbalanced/i);
+      } finally {
+        if (queryRunner.isTransactionActive) {
+          await queryRunner.rollbackTransaction();
+        }
+        await queryRunner.release();
+      }
+
+      expect(await persistedEntryCount(transactionId)).toBe(0);
+    });
+
+    it("rejects two assets each off by equal and opposite residuals (fools a sum-of-residuals check)", async () => {
+      const usdDebitAccount = await createDisposableAccount("USD");
+      const usdCreditAccount = await createDisposableAccount("USD");
+      const usdxDebitAccount = await createDisposableAccount("USDX");
+      const usdxCreditAccount = await createDisposableAccount("USDX");
+
+      const queryRunner = dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+
+      const transactionId = await createTransaction(`cross-asset-residual-${randomUUID()}`);
+
+      try {
+        // USD residual: +50 (debit-heavy). USDX residual: -50 (credit-heavy). The two residuals
+        // cancel if you naively sum them across assets, but neither asset's own group is zero, so
+        // GROUP BY asset_code must still reject this.
+        await insertEntry(queryRunner, transactionId, usdDebitAccount, "debit", "USD", 100, 0);
+        await insertEntry(queryRunner, transactionId, usdCreditAccount, "credit", "USD", 50, 1);
+        await insertEntry(queryRunner, transactionId, usdxDebitAccount, "debit", "USDX", 50, 2);
+        await insertEntry(queryRunner, transactionId, usdxCreditAccount, "credit", "USDX", 100, 3);
+
+        await expect(queryRunner.commitTransaction()).rejects.toThrow(/unbalanced/i);
+      } finally {
+        if (queryRunner.isTransactionActive) {
+          await queryRunner.rollbackTransaction();
+        }
+        await queryRunner.release();
+      }
+
+      expect(await persistedEntryCount(transactionId)).toBe(0);
+    });
+
+    it("rejects three legs spread over two assets where only the grand total nets to zero", async () => {
+      const usdDebitAccount = await createDisposableAccount("USD");
+      const usdCreditAccount = await createDisposableAccount("USD");
+      const usdxCreditAccount = await createDisposableAccount("USDX");
+
+      const queryRunner = dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+
+      const transactionId = await createTransaction(`cross-asset-three-leg-${randomUUID()}`);
+
+      try {
+        // DR 100 USD, CR 60 USD, CR 40 USDX. Grand total: 100 debit vs 100 credit. Per asset: USD
+        // is short 40 credits, USDX has a lone 40 credit with no matching debit at all.
+        await insertEntry(queryRunner, transactionId, usdDebitAccount, "debit", "USD", 100, 0);
+        await insertEntry(queryRunner, transactionId, usdCreditAccount, "credit", "USD", 60, 1);
+        await insertEntry(queryRunner, transactionId, usdxCreditAccount, "credit", "USDX", 40, 2);
+
+        await expect(queryRunner.commitTransaction()).rejects.toThrow(/unbalanced/i);
+      } finally {
+        if (queryRunner.isTransactionActive) {
+          await queryRunner.rollbackTransaction();
+        }
+        await queryRunner.release();
+      }
+
+      expect(await persistedEntryCount(transactionId)).toBe(0);
+    });
+
+    it("commits a transaction that balances independently within each of two assets", async () => {
+      const usdDebitAccount = await createDisposableAccount("USD");
+      const usdCreditAccount = await createDisposableAccount("USD");
+      const usdxDebitAccount = await createDisposableAccount("USDX");
+      const usdxCreditAccount = await createDisposableAccount("USDX");
+
+      const queryRunner = dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+
+      const transactionId = await createTransaction(`cross-asset-legit-${randomUUID()}`);
+
+      try {
+        // USD leg balances on its own (100 = 100); USDX leg balances on its own (250 = 250). Two
+        // legitimately independent asset movements posted as one transaction — this is what the
+        // FX clearing pair looks like, and the trigger must let it through.
+        await insertEntry(queryRunner, transactionId, usdDebitAccount, "debit", "USD", 100, 0);
+        await insertEntry(queryRunner, transactionId, usdCreditAccount, "credit", "USD", 100, 1);
+        await insertEntry(queryRunner, transactionId, usdxDebitAccount, "debit", "USDX", 250, 2);
+        await insertEntry(queryRunner, transactionId, usdxCreditAccount, "credit", "USDX", 250, 3);
+
+        await expect(queryRunner.commitTransaction()).resolves.toBeUndefined();
+      } finally {
+        if (queryRunner.isTransactionActive) {
+          await queryRunner.rollbackTransaction();
+        }
+        await queryRunner.release();
+      }
+
+      expect(await persistedEntryCount(transactionId)).toBe(4);
     });
   });
 });

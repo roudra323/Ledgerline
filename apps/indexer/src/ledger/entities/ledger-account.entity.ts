@@ -18,8 +18,9 @@ export type OwnerType = "platform" | "merchant" | "customer";
  * serves all tenants without duplicating code/account definitions.
  *
  * `allowsNegative` is false by default — an overdraft on most accounts is a bug we want
- * surfaced at COMMIT, not silently absorbed. Only transient clearing accounts (fx_clearing,
- * rounding_residual) are allowed to go temporarily negative.
+ * surfaced at COMMIT, not silently absorbed. Only the position accounts (fx_clearing,
+ * rounding_residual) are allowed to go negative — the FX pair carries a standing position of either
+ * sign, not a holding (docs/decisions/0018-ledger-flow-postings.md).
  */
 @Entity("ledger_accounts")
 export class LedgerAccount extends BaseAuditEntity {

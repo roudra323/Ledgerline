@@ -1,4 +1,4 @@
-# OpenTelemetry Collector (Phase 4). The indexer exports OTLP here; the collector batches and
+# OpenTelemetry Collector (Part 7). The indexer exports OTLP here; the collector batches and
 # forwards to Jaeger. The collector-in-the-middle gives batching, retry, and the option to fan out
 # to Tempo / a vendor later without touching app code.
 receivers:

@@ -186,3 +186,173 @@ describe("1754006400006-LedgerTransactionKinds — the kind CHECK constraint", (
     });
   });
 });
+
+/**
+ * 1754006400008-LedgerTreasuryKinds appends five kinds — `treasury.mint`, `treasury.psp_sweep`,
+ * `payout.returned`, `compliance.frozen`, `reconciliation.adjustment` — to the twelve
+ * 1754006400006 defined, per docs/decisions/0018-ledger-flow-postings.md. The set is append-only
+ * (ADR-0016): the twelve must keep working exactly as before, and the five new ones must be
+ * accepted with the same rigor (typos rejected) the twelve already had.
+ *
+ * Same isolation strategy as above: every insert attempt runs inside a SAVEPOINT within one
+ * transaction this describe block rolls back, so nothing here is observable by any other spec file.
+ */
+describe("1754006400008-LedgerTreasuryKinds — the kind CHECK constraint", () => {
+  let dataSource: DataSource;
+  let queryRunner: QueryRunner;
+
+  const PRE_EXISTING_TWELVE = [
+    "onramp.capture",
+    "onramp.fx",
+    "onramp.reserve",
+    "onramp.settled",
+    "refund.initiated",
+    "refund.chain_reversed",
+    "refund.fiat_returned",
+    "payout.requested",
+    "payout.burned",
+    "payout.settled",
+    "chargeback.received",
+    "fx.residual",
+  ];
+
+  const NEW_FIVE = [
+    "treasury.mint",
+    "treasury.psp_sweep",
+    "payout.returned",
+    "compliance.frozen",
+    "reconciliation.adjustment",
+  ];
+
+  const ALL_SEVENTEEN = [...PRE_EXISTING_TWELVE, ...NEW_FIVE];
+
+  beforeAll(async () => {
+    dataSource = new DataSource(dataSourceOptions);
+    await dataSource.initialize();
+  });
+
+  afterAll(async () => {
+    await dataSource.destroy();
+  });
+
+  beforeEach(async () => {
+    queryRunner = dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+  });
+
+  afterEach(async () => {
+    if (queryRunner.isTransactionActive) {
+      await queryRunner.rollbackTransaction();
+    }
+    await queryRunner.release();
+  });
+
+  async function insertKind(kind: string): Promise<void> {
+    const savepoint = `sp_${randomUUID().replaceAll("-", "")}`;
+    await queryRunner.query(`SAVEPOINT ${savepoint}`);
+    try {
+      await queryRunner.query(
+        `INSERT INTO ledger_transactions (kind, cause_type, cause_id) VALUES ($1, 'test', $2)`,
+        [kind, `kind008-check-${randomUUID()}`],
+      );
+    } catch (error) {
+      await queryRunner.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+      throw error;
+    }
+    await queryRunner.query(`RELEASE SAVEPOINT ${savepoint}`);
+  }
+
+  it.each(NEW_FIVE)("accepts the new kind '%s'", async (kind) => {
+    await expect(insertKind(kind)).resolves.toBeUndefined();
+  });
+
+  it.each(PRE_EXISTING_TWELVE)(
+    "still accepts the pre-existing kind '%s' — the new CHECK is additive, not a replacement",
+    async (kind) => {
+      await expect(insertKind(kind)).resolves.toBeUndefined();
+    },
+  );
+
+  it.each([
+    ["treasury.Mint", "wrong case"],
+    ["treasury_mint", "underscore instead of dot"],
+    ["treasury.mint ", "trailing space"],
+    ["Treasury.mint", "wrong case on the prefix"],
+    ["treasury.psp-sweep", "hyphen instead of underscore"],
+    ["treasury.pspsweep", "missing separator"],
+    ["Compliance.frozen", "wrong case"],
+    ["compliance.Frozen", "wrong case on the suffix"],
+    ["payout.Returned", "wrong case"],
+    ["payout_returned", "underscore instead of dot"],
+    ["reconciliation.Adjustment", "wrong case"],
+    ["reconciliation_adjustment", "underscore instead of dot"],
+    ["reconciliation.adjustments", "trailing s"],
+  ])("rejects the near-miss typo '%s' (%s) of a new kind", async (typo) => {
+    await expect(insertKind(typo)).rejects.toThrow(/violates check constraint/i);
+  });
+
+  describe("down() restores exactly the pre-existing twelve, and up() restores exactly the seventeen", () => {
+    // Same rationale as 1754006400006's version of this test: calling the real migration's down()
+    // against the live `ledger_transactions` table is order-dependent on which other spec files
+    // already committed rows using one of the five new kinds (ADD CONSTRAINT validates every
+    // existing row). A scratch table with the identical CHECK clause isolates the property this
+    // test actually cares about — that down()'s twelve and up()'s seventeen are exact opposites of
+    // each other on the five new kinds — without depending on the shared table's history.
+    async function withScratchTable(fn: () => Promise<void>): Promise<void> {
+      const savepoint = `sp_${randomUUID().replaceAll("-", "")}`;
+      await queryRunner.query(`SAVEPOINT ${savepoint}`);
+      await queryRunner.query(`CREATE TEMP TABLE kind008_check_scratch (kind text)`);
+      try {
+        await fn();
+      } finally {
+        await queryRunner.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+      }
+    }
+
+    async function setScratchCheck(kinds: readonly string[]): Promise<void> {
+      await queryRunner.query(
+        `ALTER TABLE kind008_check_scratch DROP CONSTRAINT IF EXISTS kind008_check_scratch_check`,
+      );
+      const list = kinds.map((kind) => `'${kind}'`).join(", ");
+      await queryRunner.query(
+        `ALTER TABLE kind008_check_scratch ADD CONSTRAINT kind008_check_scratch_check CHECK (kind IN (${list}))`,
+      );
+    }
+
+    async function scratchAccepts(kind: string): Promise<boolean> {
+      const savepoint = `sp_${randomUUID().replaceAll("-", "")}`;
+      await queryRunner.query(`SAVEPOINT ${savepoint}`);
+      try {
+        await queryRunner.query(`INSERT INTO kind008_check_scratch (kind) VALUES ($1)`, [kind]);
+        await queryRunner.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        return true;
+      } catch {
+        await queryRunner.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        return false;
+      }
+    }
+
+    it("down()'s twelve reject all five new kinds, and up()'s seventeen accept everything down() accepts plus the five new kinds", async () => {
+      await withScratchTable(async () => {
+        // down(): exactly the twelve 1754006400006 defined — none of the five new kinds, and
+        // nothing lost from the twelve either.
+        await setScratchCheck(PRE_EXISTING_TWELVE);
+        for (const kind of PRE_EXISTING_TWELVE) {
+          expect(await scratchAccepts(kind)).toBe(true);
+        }
+        for (const kind of NEW_FIVE) {
+          expect(await scratchAccepts(kind)).toBe(false);
+        }
+
+        // up(): the twelve plus the five — nothing dropped, nothing extra beyond the documented five.
+        await setScratchCheck(ALL_SEVENTEEN);
+        for (const kind of ALL_SEVENTEEN) {
+          expect(await scratchAccepts(kind)).toBe(true);
+        }
+        expect(await scratchAccepts("reconciliation.adjustments")).toBe(false);
+        expect(await scratchAccepts("treasury.rebalance")).toBe(false);
+      });
+    });
+  });
+});

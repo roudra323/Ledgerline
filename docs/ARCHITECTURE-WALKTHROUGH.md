@@ -94,7 +94,7 @@ Everything in the rest of this document is a consequence of those four facts:
 | ------------------------------------- | --------------------------------------------------------------------------------------- |
 | Two sources of truth                  | Reconciliation invariants (§11), and drift metrics that actually mean something         |
 | Neither supports a shared transaction | Sagas with real compensation, ordered so the recoverable failure is last (§8)           |
-| Both retry                            | Idempotency at four layers, from HTTP down to a contract revert (§3.3)                  |
+| Both retry                            | Idempotency at four layers, from HTTP down to a contract revert (§6.1, §8.1)            |
 | Some steps cannot be undone           | An explicit irreversibility map, and compensations that end in a debt entry and a human |
 | "Confirmed" ≠ "final"                 | Confirmation depth as a **risk budget**, and reorgs that self-heal (§10)                |
 
@@ -209,8 +209,8 @@ state.
 
 **Layer 3 — Non-negative.** The same trigger function rejects the commit if any account marked
 `allows_negative = false` ended up below zero. Some accounts _are_ allowed to go negative — the FX
-clearing accounts pass through negative states mid-conversion by design — so it's a per-account flag,
-not a global rule.
+clearing accounts carry a standing position of either sign (§5) — so it's a per-account flag, not a
+global rule.
 
 > **Why put this in the database instead of in TypeScript?** Because a ledger whose balances merely
 > _should_ balance is worse than no ledger — it makes a claim it doesn't back. Application-level
@@ -346,8 +346,9 @@ Each account has a **normal side** — the side that increases it.
 (`1800`, `1810`) as `equity` with `normal_side = 'debit'`, while `3900 rounding_residual` is
 `equity`/`credit`. So **don't infer an account's normal side from its type** — read the
 `normal_side` column, which is what the non-negative trigger actually uses. `1800`, `1810` and
-`3900` are also the only accounts seeded `allows_negative = true`: they are transient by nature and
-must never block a posting.
+`3900` are also the only accounts seeded `allows_negative = true`: their balances are positions rather
+than holdings — the FX pair carries a standing position of either sign as conversions accumulate (§5)
+— so they must never block a posting.
 
 So:
 
@@ -406,13 +407,14 @@ Money is **always** an integer count of the smallest unit of a named asset:
 value will eventually be off by a cent, and then off by a cent in a way that can't be traced.
 
 `bigint` is exact but doesn't survive `JSON.stringify`, so `string` is the transport and storage
-form, with `bigint` used only inside `apps/indexer/src/ledger/money.ts`.
+form, with `bigint` used only inside arithmetic helpers — `apps/indexer/src/ledger/money.ts`, and
+`LedgerService`'s own pre-flight balance check (`assertPostable()` in `ledger.service.ts`).
 
 **Arithmetic may only combine amounts of the same `asset_code`.** Adding USD to USDX is meaningless.
 
 ### Fees: derive, never compute twice
 
-From `money.ts:56`:
+From `splitFee()` in `money.ts`:
 
 ```ts
 const fee = (amount * BigInt(bps)) / 10000n; // floor division
@@ -424,10 +426,11 @@ The important part is the second line. If you computed `net` independently as
 invented or destroyed a cent. Deriving `net` by subtraction makes `fee + net === amount` **true by
 construction**, for every input, always.
 
-### FX: two transactions and a clearing pair
+### FX: one transaction, two balanced halves, and a clearing pair
 
 Converting USD to USDX is **never a subtraction**. You cannot debit a USD account and credit a USDX
-account in one balanced posting, because then neither asset balances on its own.
+account against each other, because then neither asset balances on its own. The conversion is still
+one transaction — T3 in §7 — but its USD legs and its USDX legs each balance by themselves.
 
 Instead, the two sides are joined through a pair of **clearing accounts**:
 
@@ -438,27 +441,37 @@ The USD side of the trade balances against `1800`. The USDX side balances agains
 balances within itself, and the clearing pair records that a conversion happened. §7's worked example
 shows this concretely.
 
+Note what the pair does **not** do: return to zero after each payment. After a $99 on-ramp, `1800`
+sits at −$99 and `1810` at +99 USDX — a standing position that nets to zero _at the rate_. It unwinds
+when tokens come back (a refund, or a payout's burn), not when a payment settles.
+
 ### Rounding residuals are journaled, never dropped
 
-`convert()` in `money.ts:84` returns `{ amount, residual }` — the converted value _and_ the leftover
-that didn't divide evenly:
+`convert()` in `money.ts` returns `{ amount, residual }` — the converted value _and_ the part of the
+input that was too small to buy another whole unit of the target asset:
 
 ```ts
-const converted = totalNumerator / totalDenominator; // floor
-const residual = totalNumerator % totalDenominator; // the dust
+const converted = (amount * rateNumerator) / rateDenominator; // floor
+// the SMALLEST source amount that still yields `converted` — a ceiling, not a floor
+const consumed = ceilDiv(converted * rateDenominator, rateNumerator);
+// residual = amount - consumed: in the SOURCE asset's minor units
 ```
 
-That residual is posted to `3900 rounding_residual`. It is never rounded away and never silently
+The residual is a real amount of a named asset — the source asset — which is what makes it postable
+in either scale direction ([ADR-0015](decisions/0015-rounding-residual-unit.md)). That residual is
+posted to `3900 rounding_residual`. It is never rounded away and never silently
 dropped. **This is what keeps the trial balance at exactly zero forever** rather than at "zero plus a
 few cents of accumulated dust", which is the state most homegrown ledgers end up in.
 
-> **🔍 Review checkpoint.** `convert()` computes `residual` as a remainder in the units of
-> `totalDenominator`, not in units of the target asset. Confirm the caller that journals it to `3900`
-> converts it into a real asset amount first, or that `3900` is documented as holding
-> denominator-scaled dust. Getting this wrong would balance the books numerically while making the
-> residual account meaningless. Block 1.1's property tests cover `fee + net === amount`; check
-> whether an equivalent round-trip property exists for `convert` (`amount * den + residual` relates
-> back to the input).
+> **🔍 Review checkpoint — closed, and worth reading how.** This checkpoint originally asked what unit
+> the residual was in. The answer was "it depends on the scale direction": the old code returned a
+> raw division remainder that was source minor units when downscaling and a fraction of a target unit
+> when upscaling — unpostable in one direction. Both existing tests passed against it, because at a
+> 1:1 rate the two coincide. The fix pinned the unit to the source asset (ADR-0015), and the first
+> version of the fix double-floored — `adversarial-tester` caught that, hence `ceilDiv`. The
+> round-trip property now exists in `money.spec.ts` (`consumed + residual === amountMinor` for
+> arbitrary amounts, scales **and rates**). The lesson that survives: vary the rate in property tests,
+> not just the amount.
 
 ---
 
@@ -581,6 +594,20 @@ The four per-merchant codes (1300, 2000, 2010, 2200) are **not** seeded. They're
 first time a merchant needs one, by `AccountRegistryService` — so onboarding a merchant doesn't have
 to pre-provision four ledger rows for accounts they may never use.
 
+### Before any payment: the treasury holds float
+
+Tokens are **not** created per payment. Minting is a treasury operation — an operator command, the
+deployer's genesis mint, or (later) an automatic rebalance — and each mint is journaled once
+([ADR-0013](decisions/0013-treasury-float-model.md), [ADR-0018](decisions/0018-ledger-flow-postings.md)):
+
+```
+DR 1100 token_treasury     USDX  1000000000     ← tokens we now hold, unallocated
+CR 2500 stablecoin_issued  USDX  1000000000     ← every one of them is our debt
+```
+
+This is why `2500` always equals `totalSupply()` (I3): it moves when tokens are minted or burned, and
+at no other time.
+
 ### A $100.00 on-ramp, 1% fee, 1:1 FX
 
 Four postings. Watch how each one balances **within a single asset**.
@@ -596,7 +623,8 @@ CR 2100 unsettled_capture   USD    10000     ← liability up: we owe someone $1
 
 We took money but haven't decided what it becomes yet, so it sits as an undifferentiated obligation.
 
-**T3 — fee split and FX.** Here's the interesting one. Two assets, four legs, balancing separately.
+**T3 — fee split, FX, and the IOU.** Here's the interesting one. Two assets, five legs, balancing
+separately.
 
 ```
 DR 2100 unsettled_capture   USD    10000     ← discharge the obligation from T1
@@ -605,9 +633,9 @@ CR 1800 fx_clearing:USD     USD     9900     ← $99.00 into the bridge
                                    -----
                             USD: 10000 = 100 + 9900 ✅
 
-DR 1810 fx_clearing:USDX   USDX 99000000     ← $99.00 out of the bridge as USDX (6dp)
-CR 2500 stablecoin_issued  USDX 99000000     ← we now owe 99 USDX to the world
-                               --------
+DR 1810 fx_clearing:USDX    USDX 99000000    ← $99.00 out of the bridge as USDX (6dp)
+CR 2000 merchant_payable:M  USDX 99000000    ← we now owe merchant M 99 USDX — the IOU is written
+                                --------
                             USDX: 99000000 = 99000000 ✅
 ```
 
@@ -619,20 +647,34 @@ can't spend the same tokens.
 
 ```
 DR 1150 token_in_transit   USDX 99000000
-CR 1810 fx_clearing:USDX   USDX 99000000
+CR 1100 token_treasury     USDX 99000000     ← float drawn down
 ```
 
-Note `1810` is now back to zero for this payment — the bridge is transient, which is exactly right.
+`1100` is seeded `allows_negative = false`, so if the treasury holds less than 99 USDX the database
+rejects this posting at COMMIT — under the account row lock from §3.3, so two concurrent reservations
+can't both squeeze through. The saga checks first and parks in `awaiting_liquidity` (§3.7); the
+trigger is the backstop.
+
+Note what did **not** happen: `1810` did not return to zero. After this payment the FX pair holds a
+standing position — `1800` at −$99, `1810` at +99 USDX — which nets to zero at the rate. It unwinds
+when tokens come back (§8).
 
 **T5 — settled.** The chain event has been observed at confirmation depth. Only now:
 
 ```
-DR 2000 merchant_payable   USDX 99000000     ← liability DOWN: debt discharged (see §4)
-CR 1150 token_in_transit   USDX 99000000     ← the reserved tokens have left
+DR 2000 merchant_payable:M  USDX 99000000    ← liability DOWN: the IOU from T3 torn up (see §4)
+CR 1150 token_in_transit    USDX 99000000    ← the reserved tokens have left
 ```
 
 The merchant now holds 99 USDX in their own wallet. We owe them nothing. Nothing above can be undone
 by a database rollback, which is the point.
+
+**This example was wrong until 2026-09-18, and nothing noticed.** The earlier version credited
+`2500 stablecoin_issued` at T3 and reserved from `1810` at T4, so no posting ever credited
+`merchant_payable` — and T5, which debits it, was **rejected by the non-negative trigger** the first
+time anyone actually ran it. It had been reviewed many times. It was balanced every time.
+[ADR-0018](decisions/0018-ledger-flow-postings.md) records the fix, and
+`apps/indexer/test/ledger-flows.integration-spec.ts` now runs every posting in this section.
 
 > **🔍 Review checkpoint — trace this yourself against the code.** Take a real posting from
 > `LedgerService.post()` and check: does every leg carry the right `normal_side` for its account? Does
@@ -647,14 +689,14 @@ by a database rollback, which is the point.
 
 ### 8.1 On-ramp (fiat → tokens)
 
-| #   | Step        | What happens                                                                                                                                                                            | Has money moved? |
-| --- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| 1   | **Quote**   | `POST /payment-intents` with an `Idempotency-Key`. Screening runs at the `pre_credit` gate. Pricing is snapshotted.                                                                     | ❌ No            |
-| 2   | **Capture** | An outbox message calls the PSP, using the outbox `dedupe_key` as the PSP's `Idempotency-Key`. Their webhook lands in `fiat_events`. The dispatcher advances the saga and posts **T1**. | ✅ Fiat side     |
-| 3   | **Reserve** | Float is reserved under a row lock → `token_in_transit`. Postings **T3** and **T4**. No float available → the saga **parks** in `awaiting_liquidity` (§3.7), it does not fail.          | ❌ Internal only |
-| 4   | **Submit**  | The chain writer simulates, allocates a nonce, signs, persists, commits, then broadcasts (§9).                                                                                          | ⏳ In flight     |
-| 5   | **Settle**  | The **indexer** observes `PaymentSettled` at confirmation depth, appends the transition, posts **T5**. _Only here is the merchant credited._                                            | ✅ Chain side    |
-| 6   | **Serve**   | The read API queries projections only, and reports its own lag honestly via `/health`.                                                                                                  | —                |
+| #   | Step        | What happens                                                                                                                                                                                                          | Has money moved? |
+| --- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| 1   | **Quote**   | `POST /payment-intents` with an `Idempotency-Key`. Screening runs at the `pre_credit` gate. Pricing is snapshotted.                                                                                                   | ❌ No            |
+| 2   | **Capture** | An outbox message calls the PSP, using the outbox `dedupe_key` as the PSP's `Idempotency-Key`. Their webhook lands in `fiat_events`. The dispatcher advances the saga and posts **T1**.                               | ✅ Fiat side     |
+| 3   | **Reserve** | Postings **T3** and **T4**: the merchant is now owed, and float moves `token_treasury → token_in_transit` under a row lock. No float available → the saga **parks** in `awaiting_liquidity` (§3.7), it does not fail. | ❌ Internal only |
+| 4   | **Submit**  | The chain writer simulates, allocates a nonce, signs, persists, commits, then broadcasts (§9).                                                                                                                        | ⏳ In flight     |
+| 5   | **Settle**  | The **indexer** observes `PaymentSettled` at confirmation depth, appends the transition, posts **T5**. _Only here are the tokens delivered_ — the IOU from T3 is discharged.                                          | ✅ Chain side    |
+| 6   | **Serve**   | The read API queries projections only, and reports its own lag honestly via `/health`.                                                                                                                                | —                |
 
 Step 2's detail matters: the PSP's `Idempotency-Key` is the outbox row's `dedupe_key`, which is
 derived from **our aggregate id**, not randomly generated. That's deliberate — if the capture call
@@ -670,10 +712,27 @@ overrun guard — "total refunded must never exceed total captured" — is enfor
 
 1. In application code, before starting.
 2. In the database, as a constraint.
-3. **On-chain**, in `PaymentProcessor.sol`: `refunded + amount <= captured`.
+3. **On-chain**, in `PaymentProcessor.sol`: `refunded + amount <= amount settled` — in USDX, and
+   the settled amount is the merchant's **net**, because the fee is taken off-chain at T3.
 
 Three layers because the third one holds even if the first two are wrong and even if the server is
-compromised (§3, and see `docs/decisions/0009`).
+compromised (§3, and see [ADR-0009](decisions/0009-on-chain-vs-off-chain.md)).
+
+**What the ledger does.** The platform keeps its fee, and the customer is refunded in full, so the
+merchant funds the refund: the tokens it received come back, and whatever they don't cover becomes
+merchant debt. For a full refund of the §7 payment:
+
+```
+refund.chain_reversed   DR 1100 token_treasury       USDX 99000000   ← tokens back in our float
+                        CR 1810 fx_clearing:USDX     USDX 99000000
+
+refund.fiat_returned    DR 1800 fx_clearing:USD      USD      9900   ← the FX position unwinds
+                        DR 1300 merchant_receivable  USD       100   ← the $1 fee: M now owes us
+                        CR 1000 psp_receivable       USD     10000   ← the PSP refunds the card
+```
+
+Nothing is burned — the reclaimed tokens are treasury float again. `4000 fee_revenue` is untouched,
+and the merchant's $1 debt is netted against a future payout (§8.3).
 
 ### 8.3 Payout (tokens → fiat)
 
@@ -683,12 +742,30 @@ The burn is **the point of no return**. Everything reversible happens before it:
 `pre_payout` gate, velocity limits, float checks, transaction simulation. Once the burn confirms, the
 fiat transfer must happen — and if it fails, that's an operational recovery, not a rollback.
 
+**What the ledger does.** The merchant's tokens are in its own wallet, so there is no ledger
+balance to check before starting — the pre-flight check reads `balanceOf(merchant)` on-chain, and the
+burn itself is the enforcement. Nothing is posted until the burn is confirmed; then, for 99.000050
+USDX paid out at 1:1:
+
+```
+payout.burned    DR 2500 stablecoin_issued        USDX 99000050   ← supply shrinks (I3)
+                 CR 1810 fx_clearing:USDX         USDX 99000000
+                 CR 3900 rounding_residual        USDX       50   ← the dust, journaled (§5)
+                 DR 1800 fx_clearing:USD          USD      9900
+                 CR 2010 merchant_fiat_payable:M  USD      9900   ← we now owe M $99.00 in cash
+payout.settled   DR 2010 merchant_fiat_payable:M  / CR 1010 bank_settlement   USD 9900
+```
+
+If the bank transfer comes back days later (A16), `payout.returned` reverses that last posting and the
+obligation is open again.
+
 Batching, when it exists, is inserted **after** `burn_confirmed`, never before. Burns stay per-payout
 and fine-grained; only the bank-file submission batches. That way a batching bug can't destroy the
 one-to-one mapping between a payout and its burn.
 
-`docs/failure-modes.md` enumerates ~50 failure modes across all three flows, each with its trigger,
-detection, designed response, and the test that proves it.
+`docs/failure-modes.md` enumerates 57 failure modes across all three flows, each with its trigger,
+detection, designed response, and the test that will prove it — most of those tests belong to parts
+not yet built.
 
 ---
 
@@ -854,13 +931,13 @@ someone moved our tokens without going through our code — i.e. the signing key
 This table is the entire reason for having two logs. The _direction_ of a discrepancy tells you
 whether it's boring or an emergency:
 
-| Drift                 | Benign cause                                              | Serious cause                   | How to tell them apart                                                         |
-| --------------------- | --------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------ |
-| Chain ahead of ledger | Indexer lag                                               | **Unauthorized key use**        | I8 — is there a `chain_transactions` row? If not: freeze and page              |
-| Ledger ahead of chain | Should be impossible (pending sits in `token_in_transit`) | Premature credit or handler bug | Run replay. Resolves → projection bug. Doesn't → a real loss                   |
-| PSP ahead of us       | Dropped webhook                                           | —                               | The poller recovers it. Alert only if the recovery _rate_ rises                |
-| We ahead of PSP       | —                                                         | **Forged webhook**              | No benign explanation exists. Security incident, not a reconciliation incident |
-| Coverage < 1          | Fee timing                                                | We minted without backing       | Halt minting, page                                                             |
+| Drift                 | Benign cause                                                                   | Serious cause                   | How to tell them apart                                                         |
+| --------------------- | ------------------------------------------------------------------------------ | ------------------------------- | ------------------------------------------------------------------------------ |
+| Chain ahead of ledger | Indexer lag                                                                    | **Unauthorized key use**        | I8 — is there a `chain_transactions` row? If not: freeze and page              |
+| Ledger ahead of chain | Should be impossible (pending sits in `merchant_payable` / `token_in_transit`) | Premature credit or handler bug | Run replay. Resolves → projection bug. Doesn't → a real loss                   |
+| PSP ahead of us       | Dropped webhook                                                                | —                               | The poller recovers it. Alert only if the recovery _rate_ rises                |
+| We ahead of PSP       | —                                                                              | **Forged webhook**              | No benign explanation exists. Security incident, not a reconciliation incident |
+| Coverage < 1          | Fee timing                                                                     | We minted without backing       | Halt minting, page                                                             |
 
 ### Reconciliation never writes
 
@@ -907,11 +984,12 @@ to look at it.
 
 ## 13. What is actually built today
 
-**As of 2026-09-07: 16 of 76 blocks. Phase 0 complete, Part 1 (the ledger) at 7 of 9.** The
-2026-09-06 audit added no blocks — it fixed and proved what already existed. Test counts: 61 unit,
-27 script, 74 integration.
+**As of 2026-09-19: 16 of 76 blocks. Phase 0 complete, Part 1 (the ledger) at 7 of 9.** Neither the
+2026-09-06 audit nor the ADR-0018 flow correction added blocks — they fixed and proved what already
+existed.
 
-[`progress.md`](progress.md) owns this count — if the two disagree, it wins. The 2026-09-06 audit
+[`progress.md`](progress.md) owns this count and the current test counts — if the two disagree, it
+wins. The 2026-09-06 audit
 and the fixes that followed are recorded in
 [`reviews/2026-09-06-audit-and-fixes.md`](reviews/2026-09-06-audit-and-fixes.md).
 
@@ -920,25 +998,27 @@ looking at.
 
 ### Built and tested
 
-| Thing                                                                 | Where                                                    |
-| --------------------------------------------------------------------- | -------------------------------------------------------- |
-| App boots, `/health` does a real `SELECT 1`                           | `apps/indexer/src/api/health.controller.ts`              |
-| Env validated with zod, crashes at boot                               | `apps/indexer/src/config/env.schema.ts`                  |
-| Integer money — `add`/`sub`/`splitFee`/`convert`                      | `apps/indexer/src/ledger/money.ts` (property tests pass) |
-| `assets` + chart of accounts (3 assets, 16 accounts)                  | `migrations/1754006400000-AssetsAndChartOfAccounts.ts`   |
-| Ledger tables + 5 TypeORM entities                                    | `migrations/1754006400001-CreateLedgerTables.ts`         |
-| **Deferred balance trigger**                                          | `migrations/1754006400002-LedgerBalanceTrigger.ts`       |
-| Immutability trigger + `ledgerline_app` role split                    | `migrations/1754006400003-LedgerImmutability.ts`         |
-| **Non-negative check**                                                | `migrations/1754006400004-LedgerNonNegativeCheck.ts`     |
-| `LedgerService.post()` — the single writer                            | `apps/indexer/src/ledger/ledger.service.ts`              |
-| `AccountRegistryService` — code → UUID                                | `apps/indexer/src/ledger/account-registry.service.ts`    |
-| **Account-row lock** on the non-negative check                        | `migrations/1754006400007-LedgerNonNegativeLock.ts`      |
-| Entry asset bound to account asset (composite FK)                     | same migration                                           |
-| `/metrics` + the first ledger instrument                              | `apps/indexer/src/observability/`                        |
-| Integration tests in CI, throwaway DB per run                         | `.github/workflows/ci.yml`, `test/global-setup.ts`       |
-| `pnpm docs:check` — docs vs schema                                    | `scripts/docs-check.mjs` (itself tested — 12 cases)      |
-| Deterministic lock ordering in the single writer                      | `ledger.service.ts` — entries INSERTed in account order  |
-| `post()` joins a caller's transaction, and refuses one with none open | `ledger.service.ts`                                      |
+| Thing                                                                 | Where                                                           |
+| --------------------------------------------------------------------- | --------------------------------------------------------------- |
+| App boots, `/health` does a real `SELECT 1`                           | `apps/indexer/src/api/health.controller.ts`                     |
+| Env validated with zod, crashes at boot                               | `apps/indexer/src/config/env.schema.ts`                         |
+| Integer money — `add`/`sub`/`splitFee`/`convert`                      | `apps/indexer/src/ledger/money.ts` (property tests pass)        |
+| `assets` + chart of accounts (3 assets, 16 accounts)                  | `migrations/1754006400000-AssetsAndChartOfAccounts.ts`          |
+| Ledger tables + 5 TypeORM entities                                    | `migrations/1754006400001-CreateLedgerTables.ts`                |
+| **Deferred balance trigger**                                          | `migrations/1754006400002-LedgerBalanceTrigger.ts`              |
+| Immutability trigger + `ledgerline_app` role split                    | `migrations/1754006400003-LedgerImmutability.ts`                |
+| **Non-negative check**                                                | `migrations/1754006400004-LedgerNonNegativeCheck.ts`            |
+| `LedgerService.post()` — the single writer                            | `apps/indexer/src/ledger/ledger.service.ts`                     |
+| `AccountRegistryService` — code → UUID                                | `apps/indexer/src/ledger/account-registry.service.ts`           |
+| **Account-row lock** on the non-negative check                        | `migrations/1754006400007-LedgerNonNegativeLock.ts`             |
+| Entry asset bound to account asset (composite FK)                     | same migration                                                  |
+| `/metrics` + the first ledger instrument                              | `apps/indexer/src/observability/`                               |
+| Integration tests in CI, throwaway DB per run                         | `.github/workflows/ci.yml`, `test/global-setup.ts`              |
+| `pnpm docs:check` — docs vs schema                                    | `scripts/docs-check.mjs` (itself mutation-tested)               |
+| Deterministic lock ordering in the single writer                      | `ledger.service.ts` — entries INSERTed in account order         |
+| `post()` joins a caller's transaction, and refuses one with none open | `ledger.service.ts`                                             |
+| The 17 transaction kinds, append-only                                 | `migrations/1754006400006-…` and `…0008-LedgerTreasuryKinds.ts` |
+| Every posting of §7–§8 executed against the real schema               | `test/ledger-flows.integration-spec.ts`                         |
 
 ### Not built yet
 
@@ -959,8 +1039,8 @@ code.
 
 ### Open questions in the code as it stands
 
-Eight were raised here on 2026-09-06. Six are closed; the two that remain are listed with the reason.
-Full detail, including what each fix changed, is in
+Eight were raised here on 2026-09-06 and four more on 2026-09-18/19. Seven are closed; the five that remain are listed
+with the block that resolves them. Full detail of the first eight is in
 [`reviews/2026-09-06-audit-and-fixes.md`](reviews/2026-09-06-audit-and-fixes.md).
 
 **Closed.**
@@ -981,22 +1061,40 @@ Full detail, including what each fix changed, is in
    [ADR-0016](decisions/0016-transaction-kind-vocabulary.md).
 6. ~~`posted_at` is documented as set by `post()` but never was.~~ Threaded through
    `PostingRequest`, because replay determinism is a Part 4 exit criterion.
+7. ~~The payout state machine credits `token_in_transit` twice.~~ It was a symptom: the on-ramp's
+   own T5 was rejected by the database, because nothing credited `merchant_payable`, and the refund
+   and payout postings inherited the model. All three flows were redesigned together and every
+   posting is now executed by a test. See [ADR-0018](decisions/0018-ledger-flow-postings.md).
 
 **Still open.**
 
-7. **The `alreadyPosted` path never verifies the entries match** (`ledger.service.ts`). Posting the
+8. **The `alreadyPosted` path never verifies the entries match** (`ledger.service.ts`). Posting the
    same `(kind, cause_type, cause_id)` with **different legs** returns `alreadyPosted: true` and
    silently discards the new legs. Correct for a genuine redelivery, dangerous for a bug. The
    `idempotency_keys` design (§6.2) stores a `request_hash` for exactly this case and returns `422`.
    Deferred rather than fixed: the ledger has no second writer yet, and the right shape for the
    fingerprint depends on Block 6.2's idempotency work. **Resolve it with 6.2, not later.**
-8. **The payout state machine credits `token_in_transit` twice** ([`build-plan.md:139`](build-plan.md)
-   and `:141`) with no debit on that path. `1150` is seeded `allows_negative = false`, so as literally
-   written the non-negative trigger would now reject it at COMMIT — and after the lock fix, reject it
-   reliably rather than occasionally. These are one-line shorthand in a state diagram rather than real
-   postings, so they may just be abbreviated, but **resolve it before Part 9**. Related: why is
-   `merchant_payable` debited on the off-ramp at all, when §7's T5 already discharged it at on-ramp
-   settlement?
+9. **Marking a `raw_events` row orphaned is an `UPDATE`, and golden rule 1 revokes `UPDATE` on the
+   log tables.** §10 says "mark, not delete", but the design never says how the app role flips
+   `is_orphaned`. A column-level `GRANT UPDATE (is_orphaned, orphaned_at)` or a separate append-only
+   orphan table are the two candidates. **Decide it in an ADR before Block 4.4.**
+10. **A re-settlement after a reorg can collide with the posting it replaces.** If Block 4.4 keys
+    `onramp.settled` on the payment id, the re-included event's settlement hits
+    `UNIQUE(kind, cause_type, cause_id)` and returns `alreadyPosted` — silently, per item 8 — so the
+    merchant is reversed but never re-credited. Keying the cause on the `raw_events` row id (a new
+    row per inclusion, ADR-0010) avoids it. **Decide it with Block 4.4.**
+11. **The genesis mint has no fiat behind it, and nothing records the backing.** I7 is
+    `bank_settlement + psp_receivable ≥ totalSupply()`. The deployer mints the initial float
+    (`treasury.mint`) before any fiat exists, so coverage starts below 1 — and the chart of accounts
+    has no capital or equity account to journal the fiat an issuer would deposit to back it (the only
+    `3xxx` account is `3900`). On-ramps and refunds net to zero against I7 over a payment's life; the
+    gap is the float itself. Either seed a backing deposit with an owner's-capital account, or define
+    I7 over circulating supply (`totalSupply() − balanceOf(treasury)`). **Decide it with Block 2.7
+    (the deploy script) or 7.1 (the reconcilers), whichever comes first.**
+12. **When does `pre_credit` screening run?** ADR-0012 says "after capture"; the on-ramp state machine
+    (`build-plan.md` §2.1), `architecture.md` §5 and §8 here all screen at quote time, before
+    authorization — so a sanctioned payer is never charged. ADR-0012 is merged, so if quote time
+    wins, record it in a superseding ADR. **Decide it with Block 6.1.**
 
 **Three more, none of them findable by reading — only by running the code.**
 
@@ -1038,8 +1136,8 @@ Full detail, including what each fix changed, is in
 | Document                                             | Answers                                             |
 | ---------------------------------------------------- | --------------------------------------------------- |
 | [`architecture.md`](architecture.md)                 | The same content, dense and precise — the reference |
-| [`failure-modes.md`](failure-modes.md)               | ~50 failure modes, each with its test               |
-| [`decisions/`](decisions/)                           | 14 ADRs — alternatives considered and why each lost |
+| [`failure-modes.md`](failure-modes.md)               | 57 failure modes, each naming its test              |
+| [`decisions/`](decisions/)                           | 18 ADRs — alternatives considered and why each lost |
 | [`learning-path.md`](learning-path.md)               | The concepts, in 45 teaching blocks                 |
 | [`implementation-guide.md`](implementation-guide.md) | What to type, in which file, in what order          |
 | [`build-plan.md`](build-plan.md)                     | The phases and their exit criteria                  |

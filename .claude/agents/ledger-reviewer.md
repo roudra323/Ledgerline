@@ -42,8 +42,10 @@ NOTHING/UPDATE` (or equivalent), never a plain `SELECT`/`findOne()` followed by 
   A check-then-insert without a conflict clause is a race under concurrent callers, full stop,
   regardless of how unlikely the implementer believes concurrency to be for that code path.
 - If it's a read that determines whether a write is legal (a balance check, a limit check, an
-  availability check), it MUST either take a row lock (`SELECT ... FOR UPDATE`) on the row(s) it
-  read, run under `SERIALIZABLE` with retry-on-conflict, or be re-derived from data that is
+  availability check), it MUST either take a row lock on the row(s) it read — and the lock mode
+  matters: a row that a foreign key references takes a `KEY SHARE` lock on every referencing INSERT,
+  which `FOR UPDATE` conflicts with, so on `ledger_accounts` the correct mode is
+  `FOR NO KEY UPDATE` (`FOR UPDATE` deadlocked 49 of 50 postings; ADR-0017) — run under `SERIALIZABLE` with retry-on-conflict, or be re-derived from data that is
   provably visible only to the current transaction (e.g., rows this same transaction itself wrote).
   If the read touches rows written by _other_, potentially concurrent transactions, and nothing
   locks or serializes against them, this is write-skew: flag it CRITICAL and give the reviewer's

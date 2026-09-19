@@ -104,8 +104,9 @@ balance is both an invariant test and a live metric.
 `numeric(38,0)` in Postgres, `string` in TypeScript, `bigint` only inside arithmetic helpers.
 Arithmetic may only combine amounts of the same `asset_code`.
 
-Cross-asset movement is **never** a subtraction — it is two balanced transactions joined by an **FX
-clearing pair** (`1800 fx_clearing:USD` / `1810 fx_clearing:USDX`). A single `convert()` helper
+Cross-asset movement is **never** a subtraction — it is one transaction whose legs balance
+separately in each asset, joined by an **FX clearing pair** (`1800 fx_clearing:USD` /
+`1810 fx_clearing:USDX`). A single `convert()` helper
 returns `{ amount, residual }` and the residual is **journaled to `3900 rounding_residual`, never
 dropped**. The residual is an amount in the **source** asset's minor units — the part of the input
 too small to buy another whole unit of the target — which is what makes it postable in either scale
@@ -274,9 +275,14 @@ must never retroactively alter an in-flight payment.
 | 9000        | `chargeback_loss`                        | expense   | USD        |
 
 **Worked example — a $100.00 on-ramp, 1% fee, 1:1 FX.** Four postings, each balanced _within one
-asset_:
+asset_, drawing on treasury float that a separate mint put there
+([ADR-0018](decisions/0018-ledger-flow-postings.md) — which also gives the refund and payout
+postings):
 
 ```
+T0  treasury.mint       DR 1100 token_treasury     USDX  (float)          ← a treasury operation,
+                        CR 2500 stablecoin_issued  USDX  (float)            never part of a payment
+
 T1  onramp.capture      DR 1000 psp_receivable      USD    10000
                         CR 2100 unsettled_capture   USD    10000
 
@@ -284,18 +290,21 @@ T3  onramp.fx           DR 2100 unsettled_capture   USD    10000
                         CR 4000 fee_revenue         USD      100
                         CR 1800 fx_clearing:USD     USD     9900   ← USD side balances
                         DR 1810 fx_clearing:USDX   USDX 99000000
-                        CR 2500 stablecoin_issued  USDX 99000000   ← USDX side balances
+                        CR 2000 merchant_payable:M USDX 99000000   ← USDX side balances; we now owe M
 
 T4  onramp.reserve      DR 1150 token_in_transit   USDX 99000000
-                        CR 1810 fx_clearing:USDX   USDX 99000000
+                        CR 1100 token_treasury     USDX 99000000   ← float drawn down; rejected if short
 
-T5  onramp.settled      DR 2000 merchant_payable   USDX 99000000
+T5  onramp.settled      DR 2000 merchant_payable:M USDX 99000000
                         CR 1150 token_in_transit   USDX 99000000
 ```
 
-`merchant_payable` is _debited_ at settlement because delivering tokens **discharges** a liability —
-the tokens are now in the merchant's own custody. Ledgerline settles **non-custodially**, which is
-what makes the irreversibility edge cases real rather than theoretical.
+The IOU is written by T3 and torn up by T5: `merchant_payable` is _debited_ at settlement because
+delivering tokens **discharges** the liability T3 created — the tokens are now in the merchant's own
+custody. Ledgerline settles **non-custodially**, which is what makes the irreversibility edge cases
+real rather than theoretical. `2500` moves only when tokens are minted or burned, so it tracks
+`totalSupply()` (I3). The FX pair keeps a standing position (−$99 / +99 USDX) that nets to zero at the
+rate; the payout's `payout.burned` unwinds it.
 
 ---
 
@@ -323,13 +332,13 @@ demo.
 
 **Drift direction carries meaning.** This table is the whole point of having two logs:
 
-| Drift                 | Benign cause                                                | Serious cause                   | Discriminator                                                                      |
-| --------------------- | ----------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------- |
-| Chain ahead of ledger | Indexer lag                                                 | **Unauthorized key use**        | I8 — is there a `chain_transactions` row for that outflow? If not, freeze and page |
-| Ledger ahead of chain | (should be impossible — pending sits in `token_in_transit`) | Premature credit or handler bug | Run replay. If it resolves, it was a projection bug. If not, it was a real loss    |
-| PSP ahead of us       | Dropped webhook                                             | —                               | The poller recovers it; alert only if the recovery _rate_ rises                    |
-| We ahead of PSP       | —                                                           | **Forged webhook**              | No benign explanation. Security incident, not a reconciliation incident            |
-| Coverage < 1          | Fee timing                                                  | We minted without backing       | Halt minting, page                                                                 |
+| Drift                 | Benign cause                                                                     | Serious cause                   | Discriminator                                                                      |
+| --------------------- | -------------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------- |
+| Chain ahead of ledger | Indexer lag                                                                      | **Unauthorized key use**        | I8 — is there a `chain_transactions` row for that outflow? If not, freeze and page |
+| Ledger ahead of chain | (should be impossible — pending sits in `merchant_payable` / `token_in_transit`) | Premature credit or handler bug | Run replay. If it resolves, it was a projection bug. If not, it was a real loss    |
+| PSP ahead of us       | Dropped webhook                                                                  | —                               | The poller recovers it; alert only if the recovery _rate_ rises                    |
+| We ahead of PSP       | —                                                                                | **Forged webhook**              | No benign explanation. Security incident, not a reconciliation incident            |
+| Coverage < 1          | Fee timing                                                                       | We minted without backing       | Halt minting, page                                                                 |
 
 **Reconciliation runs with zero writes in audit mode.** Auto-healing is a separately-invoked action
 with its own ledger transactions and an operator id. _A system that silently self-heals a discrepancy
@@ -344,11 +353,12 @@ has destroyed the evidence of the bug._
 2. **Capture** — an outbox message calls the PSP with the outbox `dedupe_key` as the
    `Idempotency-Key`. The PSP's webhook lands in `fiat_events`. The dispatcher advances the saga and
    posts **T1**.
-3. **Reserve** — float is reserved under a row lock (`token_in_transit`), postings **T3**/**T4**. No
-   float → the saga _parks_ in `awaiting_liquidity` rather than failing.
+3. **Reserve** — postings **T3**/**T4**: the merchant is now owed, and treasury float is reserved into
+   `token_in_transit` under the account row lock. No float → the saga _parks_ in
+   `awaiting_liquidity` rather than failing; the non-negative check on `1100` is the backstop.
 4. **Submit** — the submitter simulates, allocates a nonce, signs, persists, commits, broadcasts.
 5. **Settle** — the indexer observes `PaymentSettled` at confirmation depth, appends the transition
-   and posts **T5**. _Only now is the merchant credited._
+   and posts **T5**. _Only now are the tokens delivered_ — the obligation T3 recorded is discharged.
 6. **Serve** — the read API queries projections only, and reports lag honestly via `/health`.
 
 The reverse flows (refund, payout) are documented as full state machines in

@@ -199,6 +199,10 @@ We take our fee and figure out who it belongs to:
 
 Read those until they click. Every operation in this project is one of these.
 
+(Simplified to one currency so the shape is visible. The real merchant is owed **USDX**, not dollars
+— `2000 merchant_payable` only accepts USDX — so the real posting carries the $99 across an FX
+clearing pair into 99 USDX. Same shape, one more pair of legs: see `docs/architecture.md` §3.3.)
+
 **The one confusing part.** "Debit" doesn't mean decrease and "credit" doesn't mean increase — it
 depends on the account type. Don't fight it, just internalise these four:
 
@@ -333,8 +337,8 @@ await ledger.post({
   cause: { type: "fiat_event", id: "evt_123" }, // makes it idempotent
   memo: "Card captured for intent abc",
   entries: [
-    { account: "1000", direction: "debit", asset: "USD", amount: "10000" },
-    { account: "2100", direction: "credit", asset: "USD", amount: "10000" },
+    { accountCode: "1000", direction: "debit", assetCode: "USD", amountMinor: "10000" },
+    { accountCode: "2100", direction: "credit", assetCode: "USD", amountMinor: "10000" },
   ],
 });
 ```
@@ -344,9 +348,11 @@ trigger be the backstop. Why both? Because the TypeScript check gives you a good
 pointing at the line of code, while the trigger catches everything the TypeScript path missed. Two
 layers, different failure modes.
 
-**Build.** The service, in one transaction: insert header → insert entries → update balances.
+**Build.** The service, in one transaction: insert header → insert entries. (Updating the balances
+projection is Block 1.7's.)
 
-**Done when.** A test posts a balanced transaction and reads the balances back correctly.
+**Done when.** A test posts a balanced transaction, a redelivery of the same cause posts nothing, and
+an unbalanced one is rejected.
 
 **Can you answer this?** _"Why validate in both the app and the database? Isn't that duplication?"_
 
@@ -367,8 +373,11 @@ That `UPDATE` takes a **row lock**. Which means if two payouts try to spend the 
 balance at the same instant, Postgres forces them into a queue. One sees the balance _after_ the
 other has taken its share.
 
-Without that lock, both would read "$500 available," both approve, and you've spent $1000 you don't
-have. **The cache is also your concurrency control.** That's the second reason from Block 1.3.
+Without a lock, both would read "$500 available," both approve, and you've spent $1000 you don't
+have. That is the second reason from Block 1.3 — and it turned out to be urgent enough that it could
+not wait for this block: the non-negative trigger already locks the **account** row
+(`FOR NO KEY UPDATE`, ADR-0017). This block moves the lock onto the projection row, where it
+belongs, and stops the trigger re-reading an account's whole history on every insert.
 
 **Build.** Update balances inside the same transaction as the entries, via a row-locking `UPDATE`.
 
@@ -845,8 +854,8 @@ next one out of order, then drop the third."_ Without that, every failure you've
 claim you can't test.
 
 **Build.** A small service with payment endpoints and a `POST /_fault` endpoint that arms a specific
-misbehaviour: `duplicate`, `reorder`, `delay`, `drop_webhook`, `wrong_amount`, `late_return`,
-`clock_skew`, `bad_signature`.
+misbehaviour — duplicate delivery, reordering, a dropped webhook, a wrong amount, a bad signature and
+more. The full list, with the failure mode each one exercises, is in `apps/mock-psp/README.md`.
 
 **Design point:** faults are **armed deliberately**, never random. A test arms one, runs one payment,
 asserts one outcome. A random chaos harness produces flaky tests, and flaky tests get deleted.
@@ -996,11 +1005,12 @@ Now connect everything you've built:
 ```
 create intent → screen → charge card (outbox → PSP)
              → webhook lands in fiat_events
-             → dispatcher advances the saga, posts to the ledger
-             → reserve treasury float
+             → dispatcher advances the saga, posts T1 (captured)
+             → T3: fee + FX; the merchant is now OWED (merchant_payable)
+             → T4: reserve treasury float (token_treasury → token_in_transit)
              → submit chain transaction (outbox → submitter)
              → indexer sees PaymentSettled at depth
-             → merchant credited
+             → T5: tokens delivered; what we owed is discharged
 ```
 
 **Watch what happens when the treasury is low:** the payment **parks** in `awaiting_liquidity`. It

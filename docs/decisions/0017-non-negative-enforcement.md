@@ -4,9 +4,10 @@
 
 ## Context
 
-[`architecture.md`](../architecture.md) §2.2 and [ADR-0004](0004-double-entry-ledger.md) describe the
-ledger's deferred constraint trigger as enforcing three things: immutability, `Σ debits = Σ credits`
-per asset, and **non-negative balances** on accounts with `allows_negative = false`. Migration
+[`architecture.md`](../architecture.md) §2.2 and [ADR-0004](0004-double-entry-ledger.md) describe
+three database enforcement layers for the ledger: immutability (its own trigger, `1754006400003`),
+`Σ debits = Σ credits` per asset (the deferred constraint trigger), and **non-negative balances** on
+accounts with `allows_negative = false`. Migration
 `1754006400004` added the third after the gap was found.
 
 The 2026-09-06 audit found that implementation was not concurrency-safe. It derives the balance with
@@ -62,8 +63,8 @@ account with float for 10:
 | `FOR NO KEY UPDATE` (adopted) | 14 ms     | **10**    | 0                 |
 
 Retry does not rescue the middle row, which matters because retry is the standard answer to
-deadlocks and is what the Consequences section below asks of callers. Measured independently: the
-same 20 writers, each retrying up to 300 times with jittered backoff, still finished with **1 of 20
+deadlocks and is what the Consequences section below asks of callers. Measured independently with
+20 writers, each retrying up to 300 times with jittered backoff, still finished with **1 of 20
 succeeded after ~6,000 deadlocks and 112 minutes**. A lock mode that conflicts with a lock every
 writer already holds is not a contention problem to be backed off — it is a design error.
 
@@ -76,7 +77,7 @@ as an occasional, unexplainable negative balance rather than a failing test. The
 per-asset" assumption the sum relied on is now enforced rather than assumed.
 
 The function becomes `SECURITY DEFINER`, with `search_path` pinned to `pg_catalog, public`.
-`SELECT ... FOR UPDATE` requires **UPDATE privilege** on the table, and `ledgerline_app` deliberately
+A row lock of any mode — `FOR NO KEY UPDATE` included — requires **UPDATE privilege** on the table, and `ledgerline_app` deliberately
 has only `SELECT` and `INSERT` on `ledger_accounts` — the app must never rewrite an account. Running
 the trigger as its owner keeps the lock available without weakening that grant. Pinning `search_path`
 is mandatory for any `SECURITY DEFINER` function: an unqualified name inside one is otherwise
@@ -108,7 +109,8 @@ asset while pointing at an account configured for another, which would have made
 
 **Bad — and deliberate.** Locking inside a deferred trigger means two transactions touching the same
 pair of accounts **in opposite orders** can still deadlock, because the trigger fires once per entry
-in insertion order and that order is the caller's. Postgres detects it and aborts one, which is a
+in insertion order. Through `LedgerService.post()` that order is fixed (see below); for any other
+writer — a migration, a `psql` session — it is the caller's. Postgres detects it and aborts one, which is a
 rollback — never a wrong balance. It fails closed, which is the correct direction for money, but it is
 a new way for a posting to fail and callers must be prepared to retry.
 

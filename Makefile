@@ -15,8 +15,8 @@ install: ## Install workspace + Foundry dependencies
 	pnpm install
 	cd packages/contracts && forge install --no-git foundry-rs/forge-std OpenZeppelin/openzeppelin-contracts
 
-chain: ## Local Anvil + deploy contracts + write addresses (TODO: Phase 2)
-	@echo "TODO(Phase 2): anvil + forge script Deploy.s.sol -> shared volume addresses.local.json"
+chain: ## Local Anvil + deploy contracts + write addresses (TODO(Block 2.7))
+	@echo "TODO(Block 2.7): anvil + forge script Deploy.s.sol -> shared volume addresses.local.json"
 
 contracts-build: ## Compile Solidity contracts
 	pnpm --filter @ledgerline/contracts build
@@ -64,7 +64,7 @@ typecheck: ## Typecheck all packages
 test: ## Run unit + property tests
 	pnpm test
 
-test-integration: ## Run integration tests (testcontainers: postgres + anvil)
+test-integration: ## Run integration tests (needs Postgres; a throwaway database per run)
 	pnpm --filter @ledgerline/indexer test:integration
 
 fmt: ## Format all files

@@ -39,13 +39,19 @@ fraction into one of them is not a rounding error; it is an invented amount.
 small to buy another whole minor unit of the target asset.
 
 Fold the scale change into the rate so the conversion is one rational multiply in either direction,
-then floor the round trip:
+then take the **ceiling** of the round trip — the smallest source amount that still yields
+`converted`:
 
 ```ts
-const converted = (amount * rateNumerator) / rateDenominator;
-const consumed = (converted * rateDenominator) / rateNumerator;
+const converted = (amount * rateNumerator) / rateDenominator; // floor
+const consumed = ceilDiv(converted * rateDenominator, rateNumerator);
 const residual = amount - consumed;
 ```
+
+Not a floor. Flooring `consumed` double-floors whenever the rate does not divide evenly:
+`convert("1", 0, 1, "1", "3")` would report buying 3 target units **and** leave the whole source unit
+as residual, booking the same unit twice. `adversarial-tester` caught that in the first version of
+this fix.
 
 `amount === consumed + residual` holds by construction, `residual ≥ 0` always, and the residual is a
 real amount in a named asset — so it posts to `3900 rounding_residual` in the **source** asset and the
@@ -76,8 +82,9 @@ guarantee `splitFee()` already gets from deriving `net = amount - fee`.
 change corrects an underspecified unit rather than altering agreed behaviour.
 
 **Bad.** On a large downscale the residual can be large in source units (up to `10ⁿ − 1` — nearly a
-whole cent's worth of USDX wei). That is correct and it is the point, but a reader who expects
-"dust" to mean "one or two units" will be surprised. The JSDoc says so explicitly.
+whole cent's worth of USDX minor units). That is correct and it is the point, but a reader who
+expects "dust" to mean "one or two units" will be surprised. `convert()`'s JSDoc names the unit;
+this ADR is where the magnitude is recorded.
 
 **Bad.** `convert()` now performs two divisions instead of one. Irrelevant next to a database round
 trip, noted only so nobody rediscovers it as an optimisation.
