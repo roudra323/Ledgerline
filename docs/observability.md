@@ -64,6 +64,7 @@ Those belong in **span attributes and structured logs**, where cardinality is fr
 | `ledgerline_trial_balance_residual_minor`   | gauge   | `asset` — **must be 0**                                                                                      |
 | `ledgerline_balance_projection_drift_minor` | gauge   | `asset`                                                                                                      |
 | `ledgerline_ledger_entries_written_total`   | counter | `kind`                                                                                                       |
+| `ledgerline_ledger_postings_rejected_total` | counter | `kind`, `reason_class` (`unbalanced`\|`negative_balance`\|`idempotency_conflict`)                            |
 | `ledgerline_account_balance_minor`          | gauge   | `account_code`, `asset` — **platform accounts only** (a bounded set; per-merchant accounts are not exported) |
 | `ledgerline_rounding_residual_minor`        | gauge   | `asset`                                                                                                      |
 | `ledgerline_merchant_debt_minor`            | gauge   | `asset` (aggregate across merchants)                                                                         |

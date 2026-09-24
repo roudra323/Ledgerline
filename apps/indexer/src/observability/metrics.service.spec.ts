@@ -15,7 +15,18 @@ describe("MetricsService.recordLedgerEntriesWritten", () => {
       labelNames: ["kind"],
       registers: [new Registry()],
     });
-    return { service: new MetricsService(counter), counter };
+    return {
+      service: new MetricsService(
+        counter,
+        new Counter({
+          name: "ledgerline_ledger_postings_rejected_total",
+          help: "test",
+          labelNames: ["kind", "reason_class"],
+          registers: [new Registry()],
+        }),
+      ),
+      counter,
+    };
   }
 
   it("increments the counter by exactly the entry count, labelled by kind", async () => {

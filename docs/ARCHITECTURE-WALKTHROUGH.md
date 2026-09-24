@@ -225,7 +225,8 @@ global rule.
 >   deferred statement-level triggers give you the `NEW` access this function needs (they don't, which
 >   is likely why it's per-row; but the trade-off should be a conscious one).
 > - The non-negative check re-aggregates that account's _entire history_ on every single entry
->   insert. Two consequences: (a) it gets linearly slower forever, and (b) once
+>   insert into an account with a floor (`1754006400009` stopped doing it — and stopped locking — for
+>   the `allows_negative` accounts, where the result was never used; ADR-0019). Two consequences: (a) it gets linearly slower forever, and (b) once
 >   `ledger_account_balances` exists (Block 1.7), there will be two independent ways to compute a
 >   balance, which can disagree. Block 1.7 replaces the scan with a read of the locked projection
 >   row; `1754006400007` carries a `TODO(Block 1.7)` at the spot.
@@ -1071,19 +1072,19 @@ with the block that resolves them. Full detail of the first eight is in
 
 **Still open.**
 
-8. **The `alreadyPosted` path never verifies the entries match** (`ledger.service.ts`). Posting the
-   same `(kind, cause_type, cause_id)` with **different legs** returns `alreadyPosted: true` and
-   silently discards the new legs. Correct for a genuine redelivery, dangerous for a bug. The
-   `idempotency_keys` design (§6.2) stores a `request_hash` for exactly this case and returns `422`.
-   Deferred rather than fixed: the ledger has no second writer yet, and the right shape for the
-   fingerprint depends on Block 6.2's idempotency work. **Resolve it with 6.2, not later.**
+8. **The `alreadyPosted` path never verified the entries match** (`ledger.service.ts`). Posting the
+   same `(kind, cause_type, cause_id)` with **different legs** returned `alreadyPosted: true` and
+   silently discarded the new legs. **Resolved 2026-09-24 ([ADR-0019](decisions/0019-ledger-trigger-error-contract.md)):**
+   the replay's legs are now compared with the stored entries and a difference throws
+   `LedgerIdempotencyConflictError`. No stored fingerprint was needed — the stored entries are the
+   fingerprint — so it no longer waits on Block 6.2.
 9. **Marking a `raw_events` row orphaned is an `UPDATE`, and golden rule 1 revokes `UPDATE` on the
    log tables.** §10 says "mark, not delete", but the design never says how the app role flips
    `is_orphaned`. A column-level `GRANT UPDATE (is_orphaned, orphaned_at)` or a separate append-only
    orphan table are the two candidates. **Decide it in an ADR before Block 4.4.**
 10. **A re-settlement after a reorg can collide with the posting it replaces.** If Block 4.4 keys
     `onramp.settled` on the payment id, the re-included event's settlement hits
-    `UNIQUE(kind, cause_type, cause_id)` and returns `alreadyPosted` — silently, per item 8 — so the
+    `UNIQUE(kind, cause_type, cause_id)` and returns `alreadyPosted` — the legs match, so item 8's check does not fire — so the
     merchant is reversed but never re-credited. Keying the cause on the `raw_events` row id (a new
     row per inclusion, ADR-0010) avoids it. **Decide it with Block 4.4.**
 11. **The genesis mint has no fiat behind it, and nothing records the backing.** I7 is

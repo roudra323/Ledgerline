@@ -21,7 +21,15 @@ describe("LedgerService.post() validation", () => {
       labelNames: ["kind"],
       registers: [new Registry()],
     });
-    return new MetricsService(counter);
+    return new MetricsService(
+      counter,
+      new Counter({
+        name: "ledgerline_ledger_postings_rejected_total",
+        help: "test",
+        labelNames: ["kind", "reason_class"],
+        registers: [new Registry()],
+      }),
+    );
   }
 
   function buildService(): LedgerService {

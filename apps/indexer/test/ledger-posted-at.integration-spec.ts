@@ -32,6 +32,12 @@ describe("PostingRequest.postedAt threading", () => {
         labelNames: ["kind"],
         registers: [new Registry()],
       }),
+      new Counter({
+        name: "ledgerline_ledger_postings_rejected_total",
+        help: "test",
+        labelNames: ["kind", "reason_class"],
+        registers: [new Registry()],
+      }),
     );
     ledger = new LedgerService(dataSource, accounts, metrics);
   });

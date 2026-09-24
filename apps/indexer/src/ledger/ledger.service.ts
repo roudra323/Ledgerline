@@ -5,6 +5,12 @@ import { DataSource, type EntityManager, type QueryRunner } from "typeorm";
 import { MetricsService } from "../observability/metrics.service";
 
 import { AccountRegistryService } from "./account-registry.service";
+import {
+  LedgerIdempotencyConflictError,
+  LedgerRejectionError,
+  LedgerUnbalancedError,
+  toLedgerError,
+} from "./ledger-errors";
 import type { PostingLeg, PostingRequest, PostingResult } from "./ledger.types";
 
 const MIN_LEGS = 2;
@@ -33,10 +39,21 @@ export class LedgerService {
    * Pass `joinTransaction` to post inside a transaction the caller already owns — a saga's state
    * change and its ledger posting must commit together, or a crash between them leaves a transition
    * with no posting. When it is passed, this method neither commits nor rolls back: the caller's
-   * COMMIT is where the deferred balance trigger fires.
+   * COMMIT is where the deferred balance trigger fires — so translate a failure there with
+   * `toLedgerError()` to get the same typed rejections this method throws on its own path.
+   *
+   * @throws LedgerUnbalancedError when the legs do not net to zero in some asset — caught by the
+   *   check below before any SQL, and by the database at COMMIT for anything that gets past it.
+   * @throws LedgerNegativeBalanceError when COMMIT would take an account with a floor below zero
+   *   (own transaction only; a joined one fails at the caller's COMMIT, as above).
+   * @throws LedgerIdempotencyConflictError when the cause was already posted with different legs.
    */
   async post(request: PostingRequest, joinTransaction?: QueryRunner): Promise<PostingResult> {
-    this.assertPostable(request.entries);
+    try {
+      this.assertPostable(request.entries);
+    } catch (error) {
+      throw this.recordRejection(request, error);
+    }
 
     if (joinTransaction) {
       // Without this guard the promise above is a lie: a QueryRunner that is connected but has no
@@ -48,7 +65,11 @@ export class LedgerService {
           "post() was given a QueryRunner with no active transaction — call startTransaction() first, or omit it and let post() manage its own",
         );
       }
-      return this.write(joinTransaction, request);
+      try {
+        return await this.write(joinTransaction, request);
+      } catch (error) {
+        throw this.recordRejection(request, error);
+      }
     }
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -63,7 +84,7 @@ export class LedgerService {
       if (queryRunner.isTransactionActive) {
         await queryRunner.rollbackTransaction();
       }
-      throw error;
+      throw this.recordRejection(request, toLedgerError(error));
     } finally {
       await queryRunner.release();
     }
@@ -72,11 +93,66 @@ export class LedgerService {
   /** The write itself, with no opinion about who owns the surrounding transaction. */
   private async write(queryRunner: QueryRunner, request: PostingRequest): Promise<PostingResult> {
     const result = await this.insertTransactionHeader(queryRunner, request);
-    if (!result.alreadyPosted) {
-      await this.insertEntries(queryRunner, result.transactionId, request.entries);
-      this.metrics.recordLedgerEntriesWritten(request.kind, request.entries.length);
+    if (result.alreadyPosted) {
+      await this.assertSameLegsAsPosted(queryRunner, result.transactionId, request);
+      return result;
     }
+    await this.insertEntries(queryRunner, result.transactionId, request.entries);
+    this.metrics.recordLedgerEntriesWritten(request.kind, request.entries.length);
     return result;
+  }
+
+  /**
+   * A replayed cause is a no-op only if it describes the same money movement. Compared as a
+   * multiset in SQL rather than in TypeScript so the database's own casts normalise both sides —
+   * `uuid` for the merchant id (case, braces) and `numeric` for the amount ("0100" = "100") — and
+   * leg order does not matter, since `sequence` is recorded but is not part of what was posted.
+   */
+  private async assertSameLegsAsPosted(
+    queryRunner: QueryRunner,
+    transactionId: string,
+    request: PostingRequest,
+  ): Promise<void> {
+    const requestedLegs = request.entries.map((leg) => ({
+      account_code: leg.accountCode,
+      merchant_id: leg.merchantId ?? null,
+      asset_code: leg.assetCode,
+      direction: leg.direction,
+      amount_minor: leg.amountMinor,
+    }));
+
+    const rows = (await queryRunner.query(
+      `WITH requested AS (
+         SELECT account_code, merchant_id, asset_code, direction, amount_minor
+           FROM jsonb_to_recordset($2::jsonb) AS r(
+             account_code text, merchant_id uuid, asset_code text, direction text, amount_minor numeric)
+       ), posted AS (
+         SELECT a.code::text, a.owner_id, e.asset_code::text, e.direction::text, e.amount_minor::numeric
+           FROM ledger_entries e
+           JOIN ledger_accounts a ON a.id = e.account_id
+          WHERE e.transaction_id = $1
+       )
+       SELECT NOT EXISTS (
+         (SELECT * FROM requested EXCEPT ALL SELECT * FROM posted)
+         UNION ALL
+         (SELECT * FROM posted EXCEPT ALL SELECT * FROM requested)
+       ) AS same_legs`,
+      [transactionId, JSON.stringify(requestedLegs)],
+    )) as { same_legs: boolean }[];
+
+    if (rows[0]?.same_legs !== true) {
+      throw new LedgerIdempotencyConflictError(
+        `cause ${request.cause.type}:${request.cause.id} was already posted as ${request.kind} transaction ${transactionId} with different legs`,
+      );
+    }
+  }
+
+  /** Counts a typed rejection by kind and reason, then hands the error back for rethrowing. */
+  private recordRejection(request: PostingRequest, error: unknown): unknown {
+    if (error instanceof LedgerRejectionError) {
+      this.metrics.recordLedgerPostingRejected(request.kind, error.reasonClass);
+    }
+    return error;
   }
 
   /**
@@ -106,7 +182,7 @@ export class LedgerService {
 
     for (const [assetCode, residual] of residualByAsset) {
       if (residual !== 0n) {
-        throw new Error(`Posting is unbalanced in ${assetCode} by ${residual}`);
+        throw new LedgerUnbalancedError(`Posting is unbalanced in ${assetCode} by ${residual}`);
       }
     }
   }
