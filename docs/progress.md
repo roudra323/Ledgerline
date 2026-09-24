@@ -224,13 +224,13 @@ Re-run before every commit. Update the date when you do.
 
 | Check          | Command                    | Last green                                     |
 | -------------- | -------------------------- | ---------------------------------------------- |
-| Lint           | `pnpm lint`                | 2026-09-19 — eslint + `docs:check`             |
-| Docs vs schema | `pnpm docs:check`          | 2026-09-19 — 6 checks, 3 of them doc↔schema    |
+| Lint           | `pnpm lint`                | 2026-09-24 — eslint + `docs:check`             |
+| Docs vs schema | `pnpm docs:check`          | 2026-09-24 — 6 checks, 3 of them doc↔schema    |
 | Typecheck      | `pnpm typecheck`           | 2026-09-19                                     |
-| Format         | `pnpm format:check`        | 2026-09-19                                     |
+| Format         | `pnpm format:check`        | 2026-09-24                                     |
 | Contracts      | `pnpm contracts:test`      | — _(no tests yet, Part 2)_                     |
-| Unit           | `pnpm test`                | 2026-09-20 — 71 unit + 45 script               |
-| Integration    | `pnpm test:integration`    | 2026-09-19 — 124 tests, throwaway DB, in CI    |
+| Unit           | `pnpm test`                | 2026-09-24 — 91 indexer unit + 45 script       |
+| Integration    | `pnpm test:integration`    | 2026-09-24 — 140 tests, throwaway DB, in CI    |
 | Compose        | `docker compose config -q` | 2026-08-01 — _(Docker not running 2026-09-06)_ |
 | Alert rules    | `promtool check rules`     | 2026-08-01 — 25 rules                          |
 
@@ -240,6 +240,26 @@ Re-run before every commit. Update the date when you do.
 
 Newest first. Record anything a future reader would need: decisions taken, things that surprised
 you, blocks cut and why, questions you couldn't answer.
+
+### 2026-09-24 — Three ledger fixes ahead of Block 1.7 (ADR-0019)
+
+A review of the ledger before starting 1.7 found three gaps, fixed on `claude/loving-rubin-p5t173`.
+No block changes status: this is hardening of Blocks 1.4–1.6, recorded here rather than by editing
+their rows.
+
+- **The trigger locked and scanned accounts whose check can never fail.** Migration `1754006400009`
+  puts `AND NOT allows_negative` into the locking read, so `1800`/`1810`/`3900` are never locked or
+  scanned. Measured on a scratch database with 50k prior entries per account, 50 concurrent postings
+  to `1800`/`3900`: wall 1.86–2.10 s before, 0.26–0.29 s after (three runs each).
+- **The trigger's two rejections shared SQLSTATE `P0001`.** They now raise `LL001`/`LL002`, and
+  `ledger-errors.ts` maps them to typed errors a saga can route on — park vs dead-letter — without
+  matching message text. New counter `ledgerline_ledger_postings_rejected_total{kind, reason_class}`.
+- **A replay with different legs was acknowledged silently** (walkthrough §14 item 8). `post()` now
+  compares the replay's legs with the stored entries and throws `LedgerIdempotencyConflictError`.
+
+`adversarial-tester` wrote the tests for every changed file (five new files, failure modes C12/C13)
+and found no defects. The full-history scan on accounts _with_ a
+floor remains Block 1.7's to remove.
 
 ### 2026-09-20 — The indexer image had not built since pnpm 10
 
