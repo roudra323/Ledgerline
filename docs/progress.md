@@ -229,7 +229,7 @@ Re-run before every commit. Update the date when you do.
 | Typecheck      | `pnpm typecheck`           | 2026-09-19                                     |
 | Format         | `pnpm format:check`        | 2026-09-24                                     |
 | Contracts      | `pnpm contracts:test`      | — _(no tests yet, Part 2)_                     |
-| Unit           | `pnpm test`                | 2026-09-24 — 91 indexer unit + 45 script       |
+| Unit           | `pnpm test`                | 2026-09-24 — 97 indexer unit + 45 script       |
 | Integration    | `pnpm test:integration`    | 2026-09-24 — 140 tests, throwaway DB, in CI    |
 | Compose        | `docker compose config -q` | 2026-08-01 — _(Docker not running 2026-09-06)_ |
 | Alert rules    | `promtool check rules`     | 2026-08-01 — 25 rules                          |
