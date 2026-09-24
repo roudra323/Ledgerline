@@ -258,7 +258,7 @@ their rows.
   compares the replay's legs with the stored entries and throws `LedgerIdempotencyConflictError`.
 
 `adversarial-tester` wrote the tests for every changed file (five new files, failure modes C12/C13)
-and found no defects. The full-history scan on accounts _with_ a
+and found no defects. `ledger-reviewer` then reviewed the whole branch diff: no critical or major findings; its two nitpicks — a stale Block 1.4 snippet in `implementation-guide.md` and no direct unit test for the new metric method — were both addressed on this branch. The full-history scan on accounts _with_ a
 floor remains Block 1.7's to remove.
 
 ### 2026-09-20 — The indexer image had not built since pnpm 10
