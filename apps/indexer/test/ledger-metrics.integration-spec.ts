@@ -32,7 +32,19 @@ describe("ledger entries written metric — real post() against a real database"
       labelNames: ["kind"],
       registers: [new Registry()],
     });
-    ledger = new LedgerService(dataSource, accounts, new MetricsService(counter));
+    ledger = new LedgerService(
+      dataSource,
+      accounts,
+      new MetricsService(
+        counter,
+        new Counter({
+          name: "ledgerline_ledger_postings_rejected_total",
+          help: "test",
+          labelNames: ["kind", "reason_class"],
+          registers: [new Registry()],
+        }),
+      ),
+    );
   });
 
   afterAll(async () => {

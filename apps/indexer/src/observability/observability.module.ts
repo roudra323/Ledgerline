@@ -1,7 +1,11 @@
 import { Module } from "@nestjs/common";
 import { PrometheusModule, makeCounterProvider } from "@willsoto/nestjs-prometheus";
 
-import { LEDGER_ENTRIES_WRITTEN, MetricsService } from "./metrics.service";
+import {
+  LEDGER_ENTRIES_WRITTEN,
+  LEDGER_POSTINGS_REJECTED,
+  MetricsService,
+} from "./metrics.service";
 
 /**
  * ObservabilityModule — metrics and logging wiring.
@@ -23,6 +27,11 @@ import { LEDGER_ENTRIES_WRITTEN, MetricsService } from "./metrics.service";
       name: LEDGER_ENTRIES_WRITTEN,
       help: "Ledger entry rows written, by the transaction kind that caused them",
       labelNames: ["kind"],
+    }),
+    makeCounterProvider({
+      name: LEDGER_POSTINGS_REJECTED,
+      help: "Ledger postings refused, by transaction kind and reason class",
+      labelNames: ["kind", "reason_class"],
     }),
     MetricsService,
   ],

@@ -250,6 +250,11 @@ CREATE CONSTRAINT TRIGGER ledger_entries_balance_check
   FOR EACH ROW EXECUTE FUNCTION assert_transaction_balances();
 ```
 
+> This is the function as Block 1.4 builds it. Later migrations replace it with `CREATE OR REPLACE` —
+> the non-negative check (`1754006400004`), its row lock (`1754006400007`, ADR-0017), and the lock's
+> scope and error codes (`1754006400009`, ADR-0019). For what the database enforces today, read the
+> newest migration that defines it, not this snippet.
+
 **Why `DEFERRABLE INITIALLY DEFERRED` is load-bearing.** Entries insert one row at a time. After the
 first `INSERT`, debits ≠ credits — that's normal and temporary. A non-deferred trigger fires there and
 rejects a perfectly valid transaction. Deferred means "check at `COMMIT`," which is the only moment
