@@ -12,11 +12,11 @@
   },
   "dependencies": {
     "@ledgerline/shared": "workspace:*",
-    "viem": "^2.56.6"
+    "viem": "^2.57.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
-    "tsx": "^4.23.13",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.3"
   }
 }
